@@ -1,12 +1,13 @@
 package ani.saikou.parsers.anime
 
 
+import ani.saikou.Mapper
 import ani.saikou.client
 import ani.saikou.findBetween
 import ani.saikou.getSize
-import ani.saikou.mapper
 import ani.saikou.parsers.*
-import com.fasterxml.jackson.module.kotlin.readValue
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 class HentaiMama : AnimeParser() {
     override val name = "Hentaimama"
@@ -26,17 +27,18 @@ class HentaiMama : AnimeParser() {
             }
     }
 
-    override suspend fun loadVideoServers(episodeLink: String, extra: Any?): List<VideoServer> {
+    override suspend fun loadVideoServers(episodeLink: String, extra: Map<String,String>?): List<VideoServer> {
         val animeId = client.get(episodeLink).document.select("#post_report > input:nth-child(5)").attr("value")
-        val json = client.post(
-            "https://hentaimama.io/wp-admin/admin-ajax.php", data = mapOf(
-                "action" to "get_player_contents",
-                "a" to animeId
-            )
-        ).parsed<List<String>>()
+        val json = Mapper.parse<List<String>>(
+            client.post(
+                "https://hentaimama.io/wp-admin/admin-ajax.php", data = mapOf(
+                    "action" to "get_player_contents",
+                    "a" to animeId
+                )
+            ).text
+        )
         return json.mapIndexed { i, it ->
             val url = it.substringAfter("src=\"").substringBefore("\"")
-            println("url : $url")
             VideoServer("Mirror $i", url)
         }
 
@@ -50,10 +52,10 @@ class HentaiMama : AnimeParser() {
             val doc = client.get(server.embed.url)
 
             doc.document.selectFirst("video>source")?.attr("src")?.apply {
-                return VideoContainer(listOf(Video(null, false, this, getSize(this))))
+                return VideoContainer(listOf(Video(null, VideoType.CONTAINER, this, getSize(this))))
             }
             val unSanitized = doc.text.findBetween("sources: [", "],") ?: return VideoContainer(listOf())
-            val json = mapper.readValue<List<ResponseElement>>(
+            val json = Mapper.parse<List<ResponseElement>>(
                 "[${
                     unSanitized
                         .replace("type:", "\"type\":")
@@ -62,13 +64,17 @@ class HentaiMama : AnimeParser() {
             )
 
             return VideoContainer(json.map {
-                Video(null, it.type == "hls", it.file)
+                if (it.type == "hls")
+                    Video(null, VideoType.M3U8, it.file, null)
+                else
+                    Video(null,VideoType.CONTAINER, it.file, getSize(it.file))
             })
         }
 
+        @Serializable
         data class ResponseElement(
-            val type: String,
-            val file: String
+            @SerialName("type") val type: String,
+            @SerialName("file") val file: String
         )
     }
 

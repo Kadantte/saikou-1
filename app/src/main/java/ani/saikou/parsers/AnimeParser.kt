@@ -1,7 +1,24 @@
 package ani.saikou.parsers
 
-import ani.saikou.*
+import android.net.Uri
+import ani.saikou.FileUrl
+import ani.saikou.R
+import ani.saikou.asyncMap
+import ani.saikou.currContext
+import ani.saikou.loadData
 import ani.saikou.others.MalSyncBackup
+import ani.saikou.parsers.anime.extractors.ALions
+import ani.saikou.parsers.anime.extractors.AWish
+import ani.saikou.parsers.anime.extractors.DoodStream
+import ani.saikou.parsers.anime.extractors.FileMoon
+import ani.saikou.parsers.anime.extractors.GogoCDN
+import ani.saikou.parsers.anime.extractors.Mp4Upload
+import ani.saikou.parsers.anime.extractors.OkRu
+import ani.saikou.parsers.anime.extractors.RapidCloud
+import ani.saikou.parsers.anime.extractors.StreamTape
+import ani.saikou.parsers.anime.extractors.VidStreaming
+import ani.saikou.saveData
+import ani.saikou.tryWithSuspend
 import kotlin.properties.Delegates
 
 /**
@@ -17,11 +34,23 @@ abstract class AnimeParser : BaseParser() {
     abstract suspend fun loadEpisodes(animeLink: String, extra: Map<String, String>?): List<Episode>
 
     /**
+     * Takes ShowResponse.link, ShowResponse.extra & the Last Largest Episode Number known by app as arguments
+     *
+     * Returns the latest episode (If overriding, Make sure the episode is actually the latest episode)
+     * Returns null, if no latest episode is found.
+     * **/
+    open suspend fun getLatestEpisode(animeLink: String, extra: Map<String, String>?, latest: Float): Episode?{
+        return loadEpisodes(animeLink, extra)
+            .maxByOrNull { it.number.toFloatOrNull()?:0f }
+            ?.takeIf { latest < (it.number.toFloatOrNull() ?: 0.001f) }
+    }
+
+    /**
      * Takes Episode.link as a parameter
      *
      * This returns a Map of "Video Server's Name" & "Link/Data" of all the Video Servers present on the site, which can be further used by loadVideoServers() & loadSingleVideoServer()
      * **/
-    abstract suspend fun loadVideoServers(episodeLink: String, extra: Any?): List<VideoServer>
+    abstract suspend fun loadVideoServers(episodeLink: String, extra: Map<String,String>?): List<VideoServer>
 
 
     /**
@@ -50,18 +79,47 @@ abstract class AnimeParser : BaseParser() {
      * You can use your own way to get the Extractor for reliability.
      * if there's only extractor, you can directly return it.
      * **/
-    abstract suspend fun getVideoExtractor(server: VideoServer): VideoExtractor?
+    open suspend fun getVideoExtractor(server: VideoServer): VideoExtractor? {
+        var domain = Uri.parse(server.embed.url).host ?: return null
+        if (domain.startsWith("www.")) {domain = domain.substring(4)}
+
+        val extractor: VideoExtractor? = when (domain) {
+            "filemoon.to", "filemoon.sx"  -> FileMoon(server)
+            "rapid-cloud.co"              -> RapidCloud(server)
+            "streamtape.com"              -> StreamTape(server)
+            "vidstream.pro"               -> VidStreaming(server)
+            "mp4upload.com"               -> Mp4Upload(server)
+            "playtaku.net","goone.pro"    -> GogoCDN(server)
+            "alions.pro"                  -> ALions(server)
+            "awish.pro"                   -> AWish(server)
+            "dood.wf"                     -> DoodStream(server)
+            "ok.ru"                       -> OkRu(server)
+            "streamlare.com"              -> null // streamlare.com/e/vJ41zYN1aQblwA3g
+            else                          -> {
+                println("$name : No extractor found for: $domain | ${server.embed.url}")
+                null
+            }
+        }
+
+        return extractor
+    }
+
+    /**
+     * If the Video Servers support preloading links for the videos
+     * typically depends on what Video Extractor is being used
+     * **/
+    open val allowsPreloading = true
 
     /**
      * This Function used when there "isn't" a default Server set by the user, or when user wants to switch the Server
      *
      * Doesn't need to be overridden, if the parser is following the norm.
      * **/
-    open suspend fun loadByVideoServers(episodeUrl: String, extra: Any?, callback: (VideoExtractor) -> Unit) {
-        tryWithSuspend {
+    open suspend fun loadByVideoServers(episodeUrl: String, extra: Map<String,String>?, callback: (VideoExtractor) -> Unit) {
+        tryWithSuspend(true) {
             loadVideoServers(episodeUrl, extra).asyncMap {
                 getVideoExtractor(it)?.apply {
-                    tryWithSuspend {
+                    tryWithSuspend(true) {
                         load()
                     }
                     callback.invoke(this)
@@ -75,8 +133,8 @@ abstract class AnimeParser : BaseParser() {
      *
      * Doesn't need to be overridden, if the parser is following the norm.
      * **/
-    open suspend fun loadSingleVideoServer(serverName: String, episodeUrl: String, extra: Any?): VideoExtractor? {
-        return tryWithSuspend {
+    open suspend fun loadSingleVideoServer(serverName: String, episodeUrl: String, extra: Map<String,String>?, post: Boolean): VideoExtractor? {
+        return tryWithSuspend(post) {
             loadVideoServers(episodeUrl, extra).apply {
                 find { it.name == serverName }?.also {
                     return@tryWithSuspend getVideoExtractor(it)?.apply {
@@ -125,7 +183,7 @@ abstract class AnimeParser : BaseParser() {
     override fun saveShowResponse(mediaId: Int, response: ShowResponse?, selected: Boolean) {
         if (response != null) {
             checkIfVariablesAreEmpty()
-            setUserText("${if (selected) "Selected" else "Found"} : ${response.name}")
+            setUserText("${if (selected) currContext()!!.getString(R.string.selected) else currContext()!!.getString(R.string.found)} : ${response.name}")
             val dub = if (isDubAvailableSeparately) "_${if (selectDub) "dub" else "sub"}" else ""
             saveData("${saveName}${dub}_$mediaId", response)
         }
@@ -157,7 +215,7 @@ data class Episode(
     /**
      * In case, you want to pass extra data
      * **/
-    val extra: Any? = null,
+    val extra: Map<String,String>? = null,
 ) {
     constructor(
         number: String,
@@ -166,6 +224,6 @@ data class Episode(
         thumbnail: String,
         description: String? = null,
         isFiller: Boolean = false,
-        extra: Any? = null
+        extra: Map<String,String>? = null
     ) : this(number, link, title, FileUrl(thumbnail), description, isFiller, extra)
 }

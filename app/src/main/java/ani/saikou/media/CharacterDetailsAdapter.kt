@@ -5,7 +5,10 @@ import android.app.Activity
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
+import ani.saikou.R
+import ani.saikou.currActivity
 import ani.saikou.databinding.ItemCharacterDetailsBinding
+import ani.saikou.others.SpoilerPlugin
 import io.noties.markwon.Markwon
 import io.noties.markwon.SoftBreakAddsNewLinePlugin
 
@@ -20,9 +23,13 @@ class CharacterDetailsAdapter(private val character: Character, private val acti
     override fun onBindViewHolder(holder: GenreViewHolder, position: Int) {
         val binding = holder.binding
         val desc =
-            (if (character.age != "null") "__Age:__ " + character.age else "") +
-                    (if (character.dateOfBirth.toString() != "") "\n__Birthday:__ " + character.dateOfBirth.toString() else "") +
-                    (if (character.gender != "null") "\n__Gender:__ " + character.gender else "") + "\n" + character.description
+            (if (character.age != "null") currActivity()!!.getString(R.string.age) + " " + character.age else "")  +
+                    (if (character.dateOfBirth.toString() != "") currActivity()!!.getString(R.string.birthday) + " " + character.dateOfBirth.toString() else "") +
+                    (if (character.gender != "null") currActivity()!!.getString(R.string.gender) + " " + when(character.gender){
+                        "Male" -> currActivity()!!.getString(R.string.male)
+                        "Female" -> currActivity()!!.getString(R.string.female)
+                        else -> character.gender
+                    } else "") + "\n" + character.description
 
         binding.characterDesc.isTextSelectable
         val markWon = Markwon.builder(activity).usePlugin(SoftBreakAddsNewLinePlugin.create()).usePlugin(SpoilerPlugin()).build()

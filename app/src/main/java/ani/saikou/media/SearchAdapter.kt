@@ -1,26 +1,29 @@
 package ani.saikou.media
 
+import android.annotation.SuppressLint
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.widget.ArrayAdapter
 import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import ani.saikou.R
-import ani.saikou.anilist.Anilist
+import androidx.recyclerview.widget.RecyclerView.HORIZONTAL
+import ani.saikou.connections.anilist.Anilist
+import ani.saikou.databinding.ItemChipBinding
 import ani.saikou.databinding.ItemSearchHeaderBinding
-import ani.saikou.loadData
 import ani.saikou.saveData
+import com.google.android.material.checkbox.MaterialCheckBox.*
 
 
 class SearchAdapter(private val activity: SearchActivity) : RecyclerView.Adapter<SearchAdapter.SearchHeaderViewHolder>() {
     private val itemViewType = 6969
-    lateinit var search: Runnable
-    lateinit var requestFocus: Runnable
+    var search: Runnable? = null
+    var requestFocus: Runnable? = null
     private var textWatcher: TextWatcher? = null
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SearchHeaderViewHolder {
@@ -28,10 +31,11 @@ class SearchAdapter(private val activity: SearchActivity) : RecyclerView.Adapter
         return SearchHeaderViewHolder(binding)
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     override fun onBindViewHolder(holder: SearchHeaderViewHolder, position: Int) {
         val binding = holder.binding
 
-        binding.searchBar.hint = activity.type
+
         val imm: InputMethodManager = activity.getSystemService(AppCompatActivity.INPUT_METHOD_SERVICE) as InputMethodManager
 
         when (activity.style) {
@@ -45,46 +49,32 @@ class SearchAdapter(private val activity: SearchActivity) : RecyclerView.Adapter
             }
         }
 
-        var adult = activity.adult
-        var listOnly = activity.listOnly
+        binding.searchBar.hint = activity.result.type
+        var adult = activity.result.isAdult
+        var listOnly = activity.result.onList
 
         binding.searchBarText.removeTextChangedListener(textWatcher)
-        binding.searchBarText.setText(activity.searchText)
+        binding.searchBarText.setText(activity.result.search)
 
         binding.searchAdultCheck.isChecked = adult
         binding.searchList.isChecked = listOnly == true
 
-        binding.searchGenre.setText(activity.genre)
-        binding.searchGenre.setAdapter(
-            ArrayAdapter(
-                binding.root.context,
-                R.layout.item_dropdown,
-                Anilist.genres ?: loadData<ArrayList<String>>("genres_list") ?: arrayListOf()
-            )
-        )
-        binding.searchSortBy.setText(activity.sortBy)
-        binding.searchSortBy.setAdapter(
-            ArrayAdapter(
-                binding.root.context,
-                R.layout.item_dropdown,
-                Anilist.sortBy.keys.toTypedArray()
-            )
-        )
-        binding.searchTag.setText(activity.tag)
-        binding.searchTag.setAdapter(
-            ArrayAdapter(
-                binding.root.context,
-                R.layout.item_dropdown,
-                Anilist.tags ?: loadData<ArrayList<String>>("tags_list") ?: arrayListOf()
-            )
-        )
+        binding.searchChipRecycler.adapter = SearchChipAdapter(activity).also {
+            activity.updateChips = { it.update() }
+        }
+        binding.searchChipRecycler.layoutManager = LinearLayoutManager(binding.root.context, HORIZONTAL, false)
+
+        binding.searchFilter.setOnClickListener {
+            SearchFilterBottomDialog.newInstance().show(activity.supportFragmentManager, "dialog")
+        }
 
         fun searchTitle() {
-            val search = if (binding.searchBarText.text.toString() != "") binding.searchBarText.text.toString() else null
-            val genre = if (binding.searchGenre.text.toString() != "") binding.searchGenre.text.toString() else null
-            val sortBy = if (binding.searchSortBy.text.toString() != "") binding.searchSortBy.text.toString() else null
-            val tag = if (binding.searchTag.text.toString() != "") binding.searchTag.text.toString() else null
-            activity.search(search, genre, tag, sortBy, adult, listOnly)
+            activity.result.apply {
+                search = if (binding.searchBarText.text.toString() != "") binding.searchBarText.text.toString() else null
+                onList = listOnly
+                isAdult = adult
+            }
+            activity.search()
         }
 
         textWatcher = object : TextWatcher {
@@ -110,16 +100,6 @@ class SearchAdapter(private val activity: SearchActivity) : RecyclerView.Adapter
             }
         }
         binding.searchBar.setEndIconOnClickListener { searchTitle() }
-        binding.searchGenre.setOnItemClickListener { _, _, _, _ -> searchTitle() }
-        binding.searchTag.setOnItemClickListener { _, _, _, _ -> searchTitle() }
-        binding.searchSortBy.setOnItemClickListener { _, _, _, _ -> searchTitle() }
-
-        binding.searchClear.setOnClickListener {
-            binding.searchGenre.setText("")
-            binding.searchTag.setText("")
-            binding.searchSortBy.setText("")
-            searchTitle()
-        }
 
         binding.searchResultGrid.setOnClickListener {
             it.alpha = 1f
@@ -139,29 +119,36 @@ class SearchAdapter(private val activity: SearchActivity) : RecyclerView.Adapter
         if (Anilist.adult) {
             binding.searchAdultCheck.visibility = View.VISIBLE
             binding.searchAdultCheck.isChecked = adult
-            if (adult) {
-                binding.searchGenreCont.visibility = View.GONE
-                binding.searchTagCont.visibility = View.VISIBLE
-            }
             binding.searchAdultCheck.setOnCheckedChangeListener { _, b ->
                 adult = b
-                if (b && Anilist.tags != null) {
-                    binding.searchGenreCont.visibility = View.GONE
-                    binding.searchTagCont.visibility = View.VISIBLE
-                } else {
-                    binding.searchGenreCont.visibility = View.VISIBLE
-                    binding.searchTagCont.visibility = View.GONE
-                }
-                binding.searchGenre.setText("")
-                binding.searchTag.setText("")
                 searchTitle()
             }
-        } else {
-            binding.searchAdultCheck.visibility = View.GONE
-        }
-        binding.searchList.setOnCheckedChangeListener { _, b ->
-            listOnly = if (b) true else null
-            searchTitle()
+        } else binding.searchAdultCheck.visibility = View.GONE
+        binding.searchList.apply {
+            if (Anilist.userid != null) {
+                visibility = View.VISIBLE
+                checkedState = when(listOnly){
+                    null -> STATE_UNCHECKED
+                    true -> STATE_CHECKED
+                    false -> STATE_INDETERMINATE
+                }
+
+                addOnCheckedStateChangedListener { _, state ->
+                    listOnly = when (state) {
+                        STATE_CHECKED       -> true
+                        STATE_INDETERMINATE -> false
+                        STATE_UNCHECKED     -> null
+                        else                -> null
+                    }
+                }
+
+                setOnTouchListener { _, event ->
+                    (event.actionMasked == MotionEvent.ACTION_DOWN).also {
+                        if (it) checkedState = (checkedState + 1) % 3
+                        searchTitle()
+                    }
+                }
+            } else visibility = View.GONE
         }
 
         search = Runnable { searchTitle() }
@@ -176,4 +163,38 @@ class SearchAdapter(private val activity: SearchActivity) : RecyclerView.Adapter
     override fun getItemViewType(position: Int): Int {
         return itemViewType
     }
+
+
+    class SearchChipAdapter(val activity: SearchActivity) : RecyclerView.Adapter<SearchChipAdapter.SearchChipViewHolder>() {
+        private var chips = activity.result.toChipList()
+
+        inner class SearchChipViewHolder(val binding: ItemChipBinding) : RecyclerView.ViewHolder(binding.root)
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SearchChipViewHolder {
+            val binding = ItemChipBinding.inflate(LayoutInflater.from(parent.context), parent, false)
+            return SearchChipViewHolder(binding)
+        }
+
+
+        override fun onBindViewHolder(holder: SearchChipViewHolder, position: Int) {
+            val chip = chips[position]
+            holder.binding.root.apply {
+                text = chip.text
+                setOnClickListener {
+                    activity.result.removeChip(chip)
+                    update()
+                    activity.search()
+                }
+            }
+        }
+
+        @SuppressLint("NotifyDataSetChanged")
+        fun update() {
+            chips = activity.result.toChipList()
+            notifyDataSetChanged()
+        }
+
+        override fun getItemCount(): Int = chips.size
+    }
 }
+

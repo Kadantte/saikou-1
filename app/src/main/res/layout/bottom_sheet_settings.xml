@@ -73,7 +73,7 @@
         </LinearLayout>
 
         <Button
-            android:id="@+id/settingsAnilistSettings"
+            android:id="@+id/image_search"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="match_parent"
             android:layout_height="64dp"
@@ -82,12 +82,12 @@
             android:insetBottom="0dp"
             android:paddingStart="32dp"
             android:paddingEnd="32dp"
-            android:text="@string/anilist_settings"
+            android:text="@string/search_by_image"
             android:textAlignment="viewStart"
             android:textAllCaps="false"
             android:textColor="@color/bg_opp"
             app:cornerRadius="0dp"
-            app:icon="@drawable/ic_anilist"
+            app:icon="@drawable/ic_round_image_search_24"
             app:iconPadding="16dp"
             app:iconSize="24dp" />
 
@@ -107,6 +107,25 @@
             android:textColor="@color/bg_opp"
             app:cornerRadius="0dp"
             app:icon="@drawable/ic_round_download_24"
+            app:iconPadding="16dp"
+            app:iconSize="24dp" />
+
+        <Button
+            android:id="@+id/settingsAnilistSettings"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:fontFamily="@font/poppins_bold"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:paddingStart="32dp"
+            android:paddingEnd="32dp"
+            android:text="@string/anilist_settings"
+            android:textAlignment="viewStart"
+            android:textAllCaps="false"
+            android:textColor="@color/bg_opp"
+            app:cornerRadius="0dp"
+            app:icon="@drawable/ic_anilist"
             app:iconPadding="16dp"
             app:iconSize="24dp" />
 

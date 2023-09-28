@@ -1,8 +1,6 @@
 package ani.saikou.parsers.manga
 
-import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Point
 import ani.saikou.client
@@ -11,14 +9,13 @@ import ani.saikou.parsers.MangaChapter
 import ani.saikou.parsers.MangaImage
 import ani.saikou.parsers.MangaParser
 import ani.saikou.parsers.ShowResponse
-import com.bumptech.glide.load.Transformation
-import com.bumptech.glide.load.engine.Resource
+import com.bumptech.glide.load.engine.bitmap_recycle.BitmapPool
+import com.bumptech.glide.load.resource.bitmap.BitmapTransformation
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
-import java.io.ByteArrayOutputStream
-import java.io.File
 import java.math.BigInteger
-import java.nio.charset.Charset
 import java.security.MessageDigest
 import kotlin.math.floor
 
@@ -30,7 +27,7 @@ class MangaReaderTo : MangaParser() {
 
     private val transformation = MangaReaderToTransformation()
 
-    override suspend fun loadChapters(mangaLink: String): List<MangaChapter> {
+    override suspend fun loadChapters(mangaLink: String, extra: Map<String, String>?): List<MangaChapter> {
 
         return client.get(mangaLink).document.select("#en-chapters > .chapter-item > a").reversed()
             .mapIndexed { i: Int, it: Element ->
@@ -42,27 +39,21 @@ class MangaReaderTo : MangaParser() {
     }
 
     override suspend fun loadImages(chapterLink: String): List<MangaImage> {
-
         val id = client.get(chapterLink).document.select("#wrapper").attr("data-reading-id")
-
         val res = client.get("$hostUrl/ajax/image/list/chap/$id?mode=vertical&quality=high&hozPageSize=1")
-                .parsed<HtmlResponse>().html ?: return listOf()
-
+            .parsed<HtmlResponse>().html ?: return listOf()
         return Jsoup.parse(res).select(".iv-card").map {
             val link = it.attr("data-url")
             val trans = it.hasClass("shuffled")
             MangaImage(link, trans)
         }
-
     }
 
-    override fun getTransformation(): Transformation<File> = transformation
+    override fun getTransformation(): BitmapTransformation = transformation
 
     override suspend fun search(query: String): List<ShowResponse> {
-
         val res = client.get("$hostUrl/ajax/manga/search/suggest?keyword=${encode(query)}")
             .parsed<HtmlResponse>().html ?: return listOf()
-
         return Jsoup.parse(res).select("a:not(.nav-bottom)").map {
             val link = hostUrl + it.attr("href")
             val title = it.select(".manga-name").text()
@@ -71,9 +62,10 @@ class MangaReaderTo : MangaParser() {
         }
     }
 
+    @Serializable
     private data class HtmlResponse(
-        val status: Boolean,
-        val html: String? = null,
+        @SerialName("status") val status: Boolean,
+        @SerialName("html") val html: String? = null,
     )
 }
 
@@ -83,9 +75,7 @@ class MangaReaderTo : MangaParser() {
  * **Made by LagradOst**
  * */
 @Suppress("SameParameterValue", "LocalVariableName", "FunctionName")
-class MangaReaderToTransformation : Transformation<File> {
-    private val id = this.javaClass.name
-    private val idBytes = id.toByteArray(Charset.defaultCharset())
+class MangaReaderToTransformation : BitmapTransformation() {
     private val currentList = mutableListOf<Int>()
     private var j = 0
     private var i = 0
@@ -189,22 +179,14 @@ class MangaReaderToTransformation : Transformation<File> {
         return _0x5b93da
     }
 
-
-    override fun transform(
-        context: Context,
-        resource: Resource<File>,
-        outWidth: Int,
-        outHeight: Int
-    ): Resource<File> {
+    override fun transform(pool: BitmapPool, toTransform: Bitmap, outWidth: Int, outHeight: Int): Bitmap {
         // Chunk size, i think there could be different sizes here but i haven't found on site
         val width = 200
         val height = 200
 
         // Setup file
-        val file = resource.get()
-        val bitmap = BitmapFactory.decodeFile(file.path)
-        val realWidth = bitmap.width
-        val realHeight = bitmap.height
+        val realWidth = toTransform.width
+        val realHeight = toTransform.height
 
         val columns = (realWidth / width)
         val rows = (realHeight / height)
@@ -237,7 +219,6 @@ class MangaReaderToTransformation : Transformation<File> {
             )
         }
 
-
         val image = Bitmap.createBitmap(realWidth, realHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(image)
         diffList.forEach {
@@ -247,7 +228,7 @@ class MangaReaderToTransformation : Transformation<File> {
                 if (it.first.y >= rows) (realHeight % height) else height
 
             val part = Bitmap.createBitmap(
-                bitmap,
+                toTransform,
                 it.first.x * width,
                 it.first.y * height,
                 diffWidth,
@@ -261,43 +242,11 @@ class MangaReaderToTransformation : Transformation<File> {
             )
         }
 
-        // Write the bitmap to a file and return the file
-        val newFile = File(context.cacheDir, file.name)
-        newFile.createNewFile()
-        val bos = ByteArrayOutputStream()
-        image.compress(Bitmap.CompressFormat.PNG, 0, bos)
-        val bitmapData = bos.toByteArray()
-        newFile.writeBytes(bitmapData)
-
-        return object : Resource<File> {
-            override fun getResourceClass(): Class<File> {
-                return newFile.javaClass
-            }
-
-            override fun get(): File {
-                return newFile
-            }
-
-            override fun getSize(): Int {
-                return newFile.length().toInt()
-            }
-
-            override fun recycle() {
-                //                newFile.delete()
-            }
-        }
+        return image
     }
 
     override fun updateDiskCacheKey(messageDigest: MessageDigest) {
-        messageDigest.update(idBytes)
-    }
-
-    override fun equals(other: Any?): Boolean {
-        return other is MangaReaderToTransformation
-    }
-
-    override fun hashCode(): Int {
-        return id.hashCode()
+        messageDigest.update(this.javaClass.name.toByteArray())
     }
 
 }

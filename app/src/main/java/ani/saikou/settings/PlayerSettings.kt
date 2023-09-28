@@ -7,8 +7,26 @@ data class PlayerSettings(
     var videoInfo: Boolean = true,
     var defaultSpeed: Int = 5,
     var cursedSpeeds: Boolean = false,
+    var resize: Int = 0,
+
+    //Subtitles
+    var subtitles: Boolean = true,
+    var primaryColor: Int = 4,
+    var secondaryColor: Int = 0,
+    var outline: Int = 0,
+    var subBackground: Int = 0,
+    var subWindow: Int = 0,
+    var font: Int = 0,
+    var fontSize: Int = 20,
+    var locale: Int = 2,
+
+    //TimeStamps
+    var timeStampsEnabled: Boolean = true,
+    var useProxyForTimeStamps: Boolean = true,
+    var showTimeStampButton: Boolean = true,
 
     //Auto
+    var autoSkipOPED: Boolean = false,
     var autoPlay: Boolean = true,
     var autoSkipFiller: Boolean = false,
 
@@ -24,8 +42,8 @@ data class PlayerSettings(
     var doubleTap: Boolean = true,
     var seekTime: Int = 10,
     var skipTime: Int = 85,
-    var cast: Boolean = false,
 
-    var pip: Boolean = true,
-    var alwaysMinimize: Boolean = false,
+    //Other
+    var cast: Boolean = false,
+    var pip: Boolean = true
 ) : Serializable

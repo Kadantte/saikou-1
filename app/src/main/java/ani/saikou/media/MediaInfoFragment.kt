@@ -12,6 +12,7 @@ import android.view.ViewGroup
 import android.webkit.WebChromeClient
 import android.widget.FrameLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.core.text.HtmlCompat
 import androidx.core.view.updateLayoutParams
@@ -21,7 +22,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import ani.saikou.*
-import ani.saikou.anilist.GenresViewModel
+import ani.saikou.connections.anilist.Anilist
+import ani.saikou.connections.anilist.GenresViewModel
 import ani.saikou.databinding.*
 import io.noties.markwon.Markwon
 import io.noties.markwon.SoftBreakAddsNewLinePlugin
@@ -104,6 +106,20 @@ class MediaInfoFragment : Fragment() {
                             )
                         }
                     }
+                    if (media.anime.author != null) {
+                        binding.mediaInfoAuthorContainer.visibility = View.VISIBLE
+                        binding.mediaInfoAuthor.text = media.anime.author!!.name
+                        binding.mediaInfoAuthorContainer.setOnClickListener {
+                            ContextCompat.startActivity(
+                                requireActivity(),
+                                Intent(activity, AuthorActivity::class.java).putExtra(
+                                    "author",
+                                    media.anime.author!! as Serializable
+                                ),
+                                null
+                            )
+                        }
+                    }
                     binding.mediaInfoTotalTitle.setText(R.string.total_eps)
                     binding.mediaInfoTotal.text =
                         if (media.anime.nextAiringEpisode != null) (media.anime.nextAiringEpisode.toString() + " | " + (media.anime.totalEpisodes
@@ -112,6 +128,20 @@ class MediaInfoFragment : Fragment() {
                     type = "MANGA"
                     binding.mediaInfoTotalTitle.setText(R.string.total_chaps)
                     binding.mediaInfoTotal.text = (media.manga.totalChapters ?: "~").toString()
+                    if (media.manga.author != null) {
+                        binding.mediaInfoAuthorContainer.visibility = View.VISIBLE
+                        binding.mediaInfoAuthor.text = media.manga.author!!.name
+                        binding.mediaInfoAuthorContainer.setOnClickListener {
+                            ContextCompat.startActivity(
+                                requireActivity(),
+                                Intent(activity, AuthorActivity::class.java).putExtra(
+                                    "author",
+                                    media.manga.author!! as Serializable
+                                ),
+                                null
+                            )
+                        }
+                    }
                 }
 
                 val desc = HtmlCompat.fromHtml(
@@ -119,7 +149,7 @@ class MediaInfoFragment : Fragment() {
                     HtmlCompat.FROM_HTML_MODE_LEGACY
                 )
                 binding.mediaInfoDescription.text =
-                    "\t\t\t" + if (desc.toString() != "null") desc else "No Description Available"
+                    "\t\t\t" + if (desc.toString() != "null") desc else getString(R.string.no_description_available)
                 binding.mediaInfoDescription.setOnClickListener {
                     if (binding.mediaInfoDescription.maxLines == 5) {
                         ObjectAnimator.ofInt(binding.mediaInfoDescription, "maxLines", 100)
@@ -211,7 +241,6 @@ class MediaInfoFragment : Fragment() {
                     val markWon = Markwon.builder(requireContext())
                         .usePlugin(SoftBreakAddsNewLinePlugin.create()).build()
 
-                    @Suppress("BlockingMethodInNonBlockingContext")
                     fun makeLink(a: String): String {
                         val first = a.indexOf('"').let { if (it != -1) it else return a } + 1
                         val end = a.indexOf('"', first).let { if (it != -1) it else return a }
@@ -301,6 +330,27 @@ class MediaInfoFragment : Fragment() {
                             false
                         ).root
                         chip.text = media.tags[position]
+                        chip.setSafeOnClickListener {
+                            ContextCompat.startActivity(
+                                chip.context,
+                                Intent(chip.context, SearchActivity::class.java)
+                                    .putExtra("type", type)
+                                    .putExtra("sortBy", Anilist.sortBy[2])
+                                    .putExtra("tag", media.tags[position].substringBefore(" :"))
+                                    .putExtra("search", true)
+                                    .also {
+                                        if (media.isAdult) {
+                                            if (!Anilist.adult) Toast.makeText(
+                                                chip.context,
+                                                currActivity()?.getString(R.string.content_18),
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                            it.putExtra("hentai", true)
+                                        }
+                                    },
+                                null
+                            )
+                        }
                         chip.setOnLongClickListener { copyToClipboard(media.tags[position]);true }
                         bind.itemChipGroup.addView(chip)
                     }

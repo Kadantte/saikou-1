@@ -15,6 +15,8 @@ import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.GridLayoutManager
 import ani.saikou.*
 import ani.saikou.databinding.ActivityCharacterBinding
+import ani.saikou.others.ImageViewDialog
+import ani.saikou.others.getSerialized
 import ani.saikou.settings.UserInterfaceSettings
 import com.google.android.material.appbar.AppBarLayout
 import kotlinx.coroutines.Dispatchers
@@ -49,13 +51,13 @@ class CharacterDetailsActivity : AppCompatActivity(), AppBarLayout.OnOffsetChang
         binding.characterAppBar.addOnOffsetChangedListener(this)
 
         binding.characterClose.setOnClickListener {
-            onBackPressed()
+            onBackPressedDispatcher.onBackPressed()
         }
-        character = intent.getSerializableExtra("character") as? Character ?: return
+        character = intent.getSerialized("character") ?: return
         binding.characterTitle.text = character.name
         banner.loadImage(character.banner)
         binding.characterCoverImage.loadImage(character.image)
-        binding.characterCoverImage.setOnLongClickListener { (openLinkInBrowser(character.image)); true }
+        binding.characterCoverImage.setOnLongClickListener { ImageViewDialog.newInstance(this, character.name, character.image) }
 
         model.getCharacter().observe(this) {
             if (it != null && !loaded) {

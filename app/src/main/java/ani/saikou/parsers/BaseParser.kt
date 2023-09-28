@@ -1,10 +1,9 @@
 package ani.saikou.parsers
 
-import ani.saikou.FileUrl
-import ani.saikou.loadData
+import ani.saikou.*
 import ani.saikou.media.Media
-import ani.saikou.saveData
 import java.io.Serializable
+import java.net.URLDecoder
 import java.net.URLEncoder
 
 abstract class BaseParser {
@@ -77,7 +76,7 @@ abstract class BaseParser {
     open fun saveShowResponse(mediaId: Int, response: ShowResponse?, selected: Boolean = false) {
         if (response != null) {
             checkIfVariablesAreEmpty()
-            setUserText("${if (selected) "Selected" else "Found"} : ${response.name}")
+            setUserText("${if (selected) currContext()!!.getString(R.string.selected) else currContext()!!.getString(R.string.found)} : ${response.name}")
             saveData("${saveName}_$mediaId", response)
         }
     }
@@ -100,6 +99,9 @@ abstract class BaseParser {
     }
 
     fun encode(input: String): String = URLEncoder.encode(input, "utf-8").replace("+", "%20")
+    fun decode(input: String): String = URLDecoder.decode(input, "utf-8")
+
+    val defaultImage = "https://s4.anilist.co/file/anilistcdn/media/manga/cover/medium/default.jpg"
 }
 
 

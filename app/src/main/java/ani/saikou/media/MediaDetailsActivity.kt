@@ -2,7 +2,6 @@ package ani.saikou.media
 
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.text.SpannableStringBuilder
@@ -26,12 +25,28 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.lifecycleScope
 import androidx.viewpager2.adapter.FragmentStateAdapter
-import ani.saikou.*
-import ani.saikou.anilist.Anilist
-import ani.saikou.anime.AnimeWatchFragment
+import ani.saikou.CustomBottomNavBar
+import ani.saikou.GesturesListener
+import ani.saikou.R
+import ani.saikou.Refresh
+import ani.saikou.ZoomOutPageTransformer
+import ani.saikou.connections.anilist.Anilist
+import ani.saikou.media.anime.AnimeWatchFragment
+import ani.saikou.copyToClipboard
 import ani.saikou.databinding.ActivityMediaBinding
-import ani.saikou.manga.MangaReadFragment
+import ani.saikou.initActivity
+import ani.saikou.loadData
+import ani.saikou.loadImage
+import ani.saikou.media.manga.MangaReadFragment
+import ani.saikou.navBarHeight
+import ani.saikou.media.novel.NovelReadFragment
+import ani.saikou.openLinkInBrowser
+import ani.saikou.others.ImageViewDialog
+import ani.saikou.others.getSerialized
+import ani.saikou.saveData
 import ani.saikou.settings.UserInterfaceSettings
+import ani.saikou.snackString
+import ani.saikou.statusBarHeight
 import com.flaviofaria.kenburnsview.RandomTransitionGenerator
 import com.google.android.material.appbar.AppBarLayout
 import com.google.android.material.navigation.NavigationBarView
@@ -81,7 +96,7 @@ class MediaDetailsActivity : AppCompatActivity(), AppBarLayout.OnOffsetChangedLi
         binding.mediaAppBar.addOnOffsetChangedListener(this)
 
         binding.mediaClose.setOnClickListener {
-            onBackPressed()
+            onBackPressedDispatcher.onBackPressed()
         }
 
         if (uiSettings.bannerAnimations) {
@@ -95,24 +110,34 @@ class MediaDetailsActivity : AppCompatActivity(), AppBarLayout.OnOffsetChangedLi
         viewPager.isUserInputEnabled = false
         viewPager.setPageTransformer(ZoomOutPageTransformer(uiSettings))
 
-        var media: Media = intent.getSerializableExtra("media") as Media
+        var media: Media = intent.getSerialized("media") ?: return
         media.selected = model.loadSelected(media)
 
         binding.mediaCoverImage.loadImage(media.cover)
-        binding.mediaCoverImage.setOnLongClickListener { openLinkInBrowser(media.cover);true }
+        binding.mediaCoverImage.setOnLongClickListener {
+            ImageViewDialog.newInstance(
+                this,
+                media.userPreferredName + "[Cover]",
+                media.cover
+            )
+        }
         banner.loadImage(media.banner ?: media.cover, 400)
         val gestureDetector = GestureDetector(this, object : GesturesListener() {
-            override fun onDoubleClick(event: MotionEvent?) {
+            override fun onDoubleClick(event: MotionEvent) {
                 if (!uiSettings.bannerAnimations)
-                    toastString("Try Enabling Banner Animations from Settings")
+                    snackString(getString(R.string.enable_banner_animations))
                 else {
                     binding.mediaBanner.restart()
                     binding.mediaBanner.performClick()
                 }
             }
 
-            override fun onLongClick(event: MotionEvent?) {
-                openLinkInBrowser(media.banner ?: media.cover)
+            override fun onLongClick(event: MotionEvent) {
+                ImageViewDialog.newInstance(
+                    this@MediaDetailsActivity,
+                    media.userPreferredName + "[Banner]",
+                    media.banner ?: media.cover
+                )
                 banner.performClick()
             }
         })
@@ -130,42 +155,42 @@ class MediaDetailsActivity : AppCompatActivity(), AppBarLayout.OnOffsetChangedLi
         binding.mediaStatus.text = media.status ?: ""
 
         //Fav Button
-        if (Anilist.userid != null) {
+        val favButton = if (Anilist.userid != null) {
             if (media.isFav) binding.mediaFav.setImageDrawable(
                 AppCompatResources.getDrawable(
                     this,
                     R.drawable.ic_round_favorite_24
                 )
             )
-            val favButton = PopImageButton(
+            PopImageButton(
                 scope,
-                this,
                 binding.mediaFav,
-                media,
                 R.drawable.ic_round_favorite_24,
                 R.drawable.ic_round_favorite_border_24,
                 R.color.nav_tab,
                 R.color.fav,
-                true
-            )
-            binding.mediaFav.setOnClickListener {
-                favButton.clicked()
+                media.isFav
+            ) {
+                media.isFav = it
+                Anilist.mutation.toggleFav(media.anime != null, media.id)
+                Refresh.all()
             }
         } else {
             binding.mediaFav.visibility = View.GONE
+            null
         }
 
         fun total() {
             val text = SpannableStringBuilder().apply {
                 val white = ContextCompat.getColor(this@MediaDetailsActivity, R.color.bg_opp)
                 if (media.userStatus != null) {
-                    append(if (media.anime != null) "Watched " else "Read ")
+                    append(if (media.anime != null) getString(R.string.watched_num) else getString(R.string.read_num))
                     val typedValue = TypedValue()
-                    theme.resolveAttribute(R.attr.colorSecondary, typedValue, true)
+                    theme.resolveAttribute(com.google.android.material.R.attr.colorSecondary, typedValue, true)
                     bold { color(typedValue.data) { append("${media.userProgress}") } }
-                    append(" out of ")
+                    append(if (media.anime != null) getString(R.string.episodes_out_of) else getString(R.string.chapters_out_of))
                 } else {
-                    append("Total of ")
+                    append(if (media.anime != null) getString(R.string.episodes_total_of) else getString(R.string.chapters_total_of))
                 }
                 if (media.anime != null) {
                     if (media.anime!!.nextAiringEpisode != null) {
@@ -180,9 +205,13 @@ class MediaDetailsActivity : AppCompatActivity(), AppBarLayout.OnOffsetChangedLi
         }
 
         fun progress() {
+            val statuses: Array<String> = resources.getStringArray(R.array.status)
+            val statusStrings = if (media.manga==null) resources.getStringArray(R.array.status_anime) else resources.getStringArray(R.array.status_manga)
+            val userStatus = if(media.userStatus != null) statusStrings[statuses.indexOf(media.userStatus)] else statusStrings[0]
+
             if (media.userStatus != null) {
                 binding.mediaTotal.visibility = View.VISIBLE
-                binding.mediaAddToList.text = media.userStatus
+                binding.mediaAddToList.text = userStatus
             } else {
                 binding.mediaAddToList.setText(R.string.add)
             }
@@ -191,26 +220,23 @@ class MediaDetailsActivity : AppCompatActivity(), AppBarLayout.OnOffsetChangedLi
                 if (Anilist.userid != null) {
                     if (supportFragmentManager.findFragmentByTag("dialog") == null)
                         MediaListDialogFragment().show(supportFragmentManager, "dialog")
-                } else toastString("Please Login with Anilist!")
+                } else snackString(getString(R.string.please_login_anilist))
             }
             binding.mediaAddToList.setOnLongClickListener {
                 saveData("${media.id}_progressDialog", true)
-                toastString("Auto Update Progress has now been Reset-ed ")
+                snackString(getString(R.string.auto_update_reset))
                 true
             }
         }
         progress()
 
-        //Share Button
         model.getMedia().observe(this) {
             if (it != null) {
                 media = it
-                if (it.notify) binding.mediaNotify.setImageDrawable(
-                    AppCompatResources.getDrawable(
-                        this,
-                        R.drawable.ic_round_share_24
-                    )
-                )
+                scope.launch {
+                    if(media.isFav!=favButton?.clicked) favButton?.clicked()
+                }
+
                 binding.mediaNotify.setOnClickListener {
                     val i = Intent(Intent.ACTION_SEND)
                     i.type = "text/plain"
@@ -232,10 +258,10 @@ class MediaDetailsActivity : AppCompatActivity(), AppBarLayout.OnOffsetChangedLi
 
         tabLayout.menu.clear()
         if (media.anime != null) {
-            viewPager.adapter = ViewPagerAdapter(supportFragmentManager, lifecycle, true)
+            viewPager.adapter = ViewPagerAdapter(supportFragmentManager, lifecycle, SupportedMedia.ANIME)
             tabLayout.inflateMenu(R.menu.anime_menu_detail)
         } else if (media.manga != null) {
-            viewPager.adapter = ViewPagerAdapter(supportFragmentManager, lifecycle, false)
+            viewPager.adapter = ViewPagerAdapter(supportFragmentManager, lifecycle, if(media.format=="NOVEL") SupportedMedia.NOVEL else SupportedMedia.MANGA)
             tabLayout.inflateMenu(R.menu.manga_menu_detail)
             anime = false
         }
@@ -258,8 +284,10 @@ class MediaDetailsActivity : AppCompatActivity(), AppBarLayout.OnOffsetChangedLi
         tabLayout.selectedItemId = idFromSelect()
         viewPager.setCurrentItem(selected, false)
 
-        if (model.continueMedia == null) model.continueMedia = media.cameFromContinue
-        if (media.cameFromContinue) selected = 1
+        if (model.continueMedia == null && media.cameFromContinue) {
+            model.continueMedia = loadData("continue_media") ?: true
+            selected = 1
+        }
 
         val live = Refresh.activity.getOrPut(this.hashCode()) { MutableLiveData(true) }
         live.observe(this) {
@@ -275,7 +303,7 @@ class MediaDetailsActivity : AppCompatActivity(), AppBarLayout.OnOffsetChangedLi
 
     private fun selectFromID(id: Int) {
         when (id) {
-            R.id.info -> {
+            R.id.info             -> {
                 selected = 0
             }
             R.id.watch, R.id.read -> {
@@ -301,29 +329,27 @@ class MediaDetailsActivity : AppCompatActivity(), AppBarLayout.OnOffsetChangedLi
         super.onResume()
     }
 
+    private enum class SupportedMedia{
+        ANIME, MANGA, NOVEL
+    }
     //ViewPager
     private class ViewPagerAdapter(
         fragmentManager: FragmentManager,
         lifecycle: Lifecycle,
-        private val anime: Boolean
+        private val media: SupportedMedia
     ) :
         FragmentStateAdapter(fragmentManager, lifecycle) {
 
         override fun getItemCount(): Int = 2
 
-        override fun createFragment(position: Int): Fragment {
-            if (anime) {
-                when (position) {
-                    0 -> return MediaInfoFragment()
-                    1 -> return AnimeWatchFragment()
-                }
-            } else {
-                when (position) {
-                    0 -> return MediaInfoFragment()
-                    1 -> return MangaReadFragment()
-                }
+        override fun createFragment(position: Int): Fragment = when (position){
+            0 -> MediaInfoFragment()
+            1 -> when(media){
+                SupportedMedia.ANIME -> AnimeWatchFragment()
+                SupportedMedia.MANGA -> MangaReadFragment()
+                SupportedMedia.NOVEL -> NovelReadFragment()
             }
-            return MediaInfoFragment()
+            else -> MediaInfoFragment()
         }
     }
 
@@ -357,64 +383,73 @@ class MediaDetailsActivity : AppCompatActivity(), AppBarLayout.OnOffsetChangedLi
             if (uiSettings.bannerAnimations) binding.mediaBanner.resume()
             if (!uiSettings.immersiveMode) this.window.statusBarColor = ContextCompat.getColor(this, R.color.nav_bg_inv)
         }
-        if(percentage==1 && model.scrolledToTop.value != false) model.scrolledToTop.postValue(false)
-        if(percentage==0 && model.scrolledToTop.value != true) model.scrolledToTop.postValue(true)
+        if (percentage == 1 && model.scrolledToTop.value != false) model.scrolledToTop.postValue(false)
+        if (percentage == 0 && model.scrolledToTop.value != true) model.scrolledToTop.postValue(true)
     }
 
-    inner class PopImageButton(
+    class PopImageButton(
         private val scope: CoroutineScope,
-        private val activity: Activity,
         private val image: ImageView,
-        private val media: Media,
         private val d1: Int,
         private val d2: Int,
         private val c1: Int,
         private val c2: Int,
-        private val fav_or_not: Boolean? = null
+        var clicked: Boolean,
+        callback: suspend (Boolean) -> (Unit)
     ) {
+        private var disabled = false
+        private val context = image.context
         private var pressable = true
-        private var clicked = false
-        fun clicked() {
-            if (pressable) {
-                pressable = false
-                if (fav_or_not != null) {
-                    if (fav_or_not) {
-                        media.isFav = !media.isFav
-                        clicked = media.isFav
-                        scope.launch(Dispatchers.IO) {
-                            Anilist.mutation.toggleFav(media.anime != null, media.id)
-                            Refresh.all()
+
+        init {
+            enabled(true)
+            scope.launch {
+                clicked()
+            }
+            image.setOnClickListener {
+                if (pressable && !disabled) {
+                    pressable = false
+                    clicked = !clicked
+                    scope.launch {
+                        launch(Dispatchers.IO) {
+                            callback.invoke(clicked)
                         }
+                        clicked()
+                        pressable = true
                     }
-                } else clicked = !clicked
-                ObjectAnimator.ofFloat(image, "scaleX", 1f, 0f).setDuration(69).start()
-                ObjectAnimator.ofFloat(image, "scaleY", 1f, 0f).setDuration(100).start()
-                scope.launch {
-                    delay(100)
-                    if (clicked) {
-                        ObjectAnimator.ofArgb(
-                            image,
-                            "ColorFilter",
-                            ContextCompat.getColor(activity, c1),
-                            ContextCompat.getColor(activity, c2)
-                        ).setDuration(120).start()
-                        image.setImageDrawable(AppCompatResources.getDrawable(activity, d1))
-                    } else image.setImageDrawable(AppCompatResources.getDrawable(activity, d2))
-                    ObjectAnimator.ofFloat(image, "scaleX", 0f, 1.5f).setDuration(120).start()
-                    ObjectAnimator.ofFloat(image, "scaleY", 0f, 1.5f).setDuration(100).start()
-                    delay(120)
-                    ObjectAnimator.ofFloat(image, "scaleX", 1.5f, 1f).setDuration(100).start()
-                    ObjectAnimator.ofFloat(image, "scaleY", 1.5f, 1f).setDuration(100).start()
-                    delay(200)
-                    if (clicked) ObjectAnimator.ofArgb(
-                        image,
-                        "ColorFilter",
-                        ContextCompat.getColor(activity, c2),
-                        ContextCompat.getColor(activity, c1)
-                    ).setDuration(200).start()
-                    pressable = true
                 }
             }
+        }
+
+        suspend fun clicked() {
+            ObjectAnimator.ofFloat(image, "scaleX", 1f, 0f).setDuration(69).start()
+            ObjectAnimator.ofFloat(image, "scaleY", 1f, 0f).setDuration(100).start()
+            delay(100)
+            if (clicked) {
+                ObjectAnimator.ofArgb(image,
+                    "ColorFilter",
+                    ContextCompat.getColor(context, c1),
+                    ContextCompat.getColor(context, c2)
+                ).setDuration(120).start()
+                image.setImageDrawable(AppCompatResources.getDrawable(context, d1))
+            } else image.setImageDrawable(AppCompatResources.getDrawable(context, d2))
+            ObjectAnimator.ofFloat(image, "scaleX", 0f, 1.5f).setDuration(120).start()
+            ObjectAnimator.ofFloat(image, "scaleY", 0f, 1.5f).setDuration(100).start()
+            delay(120)
+            ObjectAnimator.ofFloat(image, "scaleX", 1.5f, 1f).setDuration(100).start()
+            ObjectAnimator.ofFloat(image, "scaleY", 1.5f, 1f).setDuration(100).start()
+            delay(200)
+            if (clicked) ObjectAnimator.ofArgb(
+                image,
+                "ColorFilter",
+                ContextCompat.getColor(context, c2),
+                ContextCompat.getColor(context, c1)
+            ).setDuration(200).start()
+        }
+
+        fun enabled(enabled: Boolean) {
+            disabled = !enabled
+            image.alpha = if(disabled)  0.33f else 1f
         }
     }
 }

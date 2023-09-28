@@ -88,6 +88,48 @@
 
     </FrameLayout>
 
+    <HorizontalScrollView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:clipToPadding="false"
+        android:paddingStart="32dp"
+        android:paddingEnd="32dp"
+        android:scrollbarSize="0dp">
+
+        <LinearLayout
+            android:id="@+id/animeSeasonsCont"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/animeThisSeason"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/this_season"
+                android:textAppearance="@style/Suffix" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/animeNextSeason"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/next_season"
+                android:textAppearance="@style/Suffix" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/animePreviousSeason"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/previous_season"
+                android:textAppearance="@style/Suffix" />
+
+
+        </LinearLayout>
+    </HorizontalScrollView>
+
+
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/animeListContainer"
         android:layout_width="match_parent"
@@ -104,7 +146,7 @@
             app:cardCornerRadius="16dp"
             app:layout_constrainedWidth="true"
             app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toStartOf="@+id/animeTopScore"
+            app:layout_constraintEnd_toStartOf="@+id/animeCalendar"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintWidth_max="256dp">
@@ -148,7 +190,7 @@
         </com.google.android.material.card.MaterialCardView>
 
         <com.google.android.material.card.MaterialCardView
-            android:id="@+id/animeTopScore"
+            android:id="@+id/animeCalendar"
             android:layout_width="match_parent"
             android:layout_height="72dp"
             android:layout_margin="8dp"
@@ -162,7 +204,7 @@
             app:layout_constraintWidth_max="256dp">
 
             <ImageView
-                android:id="@+id/animeTopScoreImage"
+                android:id="@+id/animeCalendarImage"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:scaleType="centerCrop"
@@ -186,7 +228,7 @@
                     android:layout_height="wrap_content"
                     android:layout_gravity="center"
                     android:fontFamily="@font/poppins_bold"
-                    android:text="@string/top_score"
+                    android:text="@string/release_calendar"
                     android:textAllCaps="true"
                     android:textColor="@color/bg_white"
                     android:textSize="16sp" />
@@ -242,16 +284,32 @@
 
     </FrameLayout>
 
-    <TextView
+    <LinearLayout
         android:id="@+id/animePopular"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginStart="24dp"
-        android:fontFamily="@font/poppins_bold"
-        android:padding="8dp"
-        android:text="@string/popular_anime"
-        android:textSize="16sp"
-        android:visibility="invisible"
-        tools:visibility="visible" />
+        android:layout_marginEnd="24dp"
+        android:orientation="horizontal"
+        android:visibility="invisible">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="@font/poppins_bold"
+            android:padding="8dp"
+            android:text="@string/popular_anime"
+            android:textSize="16sp" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/animeIncludeList"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="@string/include_media_in_list" />
+
+
+    </LinearLayout>
 
 </LinearLayout>

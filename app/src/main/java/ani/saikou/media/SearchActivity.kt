@@ -12,9 +12,9 @@ import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import ani.saikou.*
-import ani.saikou.anilist.Anilist
-import ani.saikou.anilist.AnilistSearch
-import ani.saikou.anilist.SearchResults
+import ani.saikou.connections.anilist.Anilist
+import ani.saikou.connections.anilist.AnilistSearch
+import ani.saikou.connections.anilist.SearchResults
 import ani.saikou.databinding.ActivitySearchBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -25,7 +25,6 @@ class SearchActivity : AppCompatActivity() {
     private val scope = lifecycleScope
     val model: AnilistSearch by viewModels()
 
-    var type = "ANIME"
     var style: Int = 0
     private var screenWidth: Float = 0f
 
@@ -33,12 +32,8 @@ class SearchActivity : AppCompatActivity() {
     private lateinit var progressAdapter: ProgressAdapter
     private lateinit var concatAdapter: ConcatAdapter
 
-    var searchText: String? = null
-    var genre: String? = null
-    var sortBy: String? = null
-    var tag: String? = null
-    var adult = false
-    var listOnly: Boolean? = null
+    lateinit var result: SearchResults
+    lateinit var updateChips: (()->Unit)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,25 +47,28 @@ class SearchActivity : AppCompatActivity() {
             bottom = navBarHeight + 80f.px
         )
 
-        type = intent.getStringExtra("type") ?: type
-        genre = intent.getStringExtra("genre")
-        sortBy = intent.getStringExtra("sortBy")
         style = loadData<Int>("searchStyle") ?: 0
-        adult = if (Anilist.adult) intent.getBooleanExtra("hentai", false) else false
-        listOnly = intent.getBooleanExtra("listOnly", false)
+        var listOnly: Boolean? = intent.getBooleanExtra("listOnly", false)
         if (!listOnly!!) listOnly = null
 
         val notSet = model.notSet
         if (model.notSet) {
             model.notSet = false
             model.searchResults = SearchResults(
-                type,
-                isAdult = false,
-                onList = null,
-                results = arrayListOf(),
+                intent.getStringExtra("type") ?: "ANIME",
+                isAdult = if (Anilist.adult) intent.getBooleanExtra("hentai", false) else false,
+                onList = listOnly,
+                genres = intent.getStringExtra("genre")?.let { mutableListOf(it) },
+                tags = intent.getStringExtra("tag")?.let { mutableListOf(it) },
+                sort = intent.getStringExtra("sortBy"),
+                season = intent.getStringExtra("season"),
+                seasonYear = intent.getStringExtra("seasonYear")?.toIntOrNull(),
+                results = mutableListOf(),
                 hasNextPage = false
             )
         }
+
+        result = model.searchResults
 
         progressAdapter = ProgressAdapter(searched = model.searched)
         mediaAdaptor = MediaAdaptor(style, model.searchResults.results, this, matchParent = true)
@@ -119,7 +117,11 @@ class SearchActivity : AppCompatActivity() {
                     search = it.search
                     sort = it.sort
                     genres = it.genres
+                    excludedGenres = it.excludedGenres
+                    excludedTags = it.excludedTags
                     tags = it.tags
+                    season = it.season
+                    seasonYear = it.seasonYear
                     format = it.format
                     page = it.page
                     hasNextPage = it.hasNextPage
@@ -129,47 +131,35 @@ class SearchActivity : AppCompatActivity() {
                 model.searchResults.results.addAll(it.results)
                 mediaAdaptor.notifyItemRangeInserted(prev, it.results.size)
 
-                if (it.hasNextPage)
-                    progressAdapter.bar?.visibility = View.VISIBLE
-                else
-                    progressAdapter.bar?.visibility = View.GONE
+                progressAdapter.bar?.visibility = if (it.hasNextPage) View.VISIBLE else View.GONE
             }
         }
 
         progressAdapter.ready.observe(this) {
             if (it == true) {
-                if (genre != null || sortBy != null || adult) {
+                if (!notSet) {
                     if (!model.searched) {
                         model.searched = true
-                        headerAdaptor.search.run()
+                        headerAdaptor.search?.run()
                     }
-                } else if (notSet)
-                    headerAdaptor.requestFocus.run()
+                } else
+                    headerAdaptor.requestFocus?.run()
+
+                if(intent.getBooleanExtra("search",false)) search()
             }
         }
     }
 
     private var searchTimer = Timer()
     private var loading = false
-    fun search(
-        search: String? = null,
-        genre: String? = null,
-        tag: String? = null,
-        sort: String? = null,
-        adult: Boolean = false,
-        listOnly: Boolean? = null
-    ) {
+    fun search() {
         val size = model.searchResults.results.size
         model.searchResults.results.clear()
-        mediaAdaptor.notifyItemRangeRemoved(0, size)
-        progressAdapter.bar?.visibility = View.VISIBLE
+        runOnUiThread {
+            mediaAdaptor.notifyItemRangeRemoved(0, size)
+        }
 
-        this.genre = genre
-        this.sortBy = sort
-        this.searchText = search
-        this.adult = adult
-        this.tag = tag
-        this.listOnly = listOnly
+        progressAdapter.bar?.visibility = View.VISIBLE
 
         searchTimer.cancel()
         searchTimer.purge()
@@ -177,15 +167,7 @@ class SearchActivity : AppCompatActivity() {
             override fun run() {
                 scope.launch(Dispatchers.IO) {
                     loading = true
-                    model.loadSearch(
-                        type,
-                        search,
-                        if (genre != null) arrayListOf(genre) else null,
-                        if (tag != null) arrayListOf(tag) else null,
-                        sort,
-                        adult,
-                        listOnly
-                    )
+                    model.loadSearch(result)
                     loading = false
                 }
             }

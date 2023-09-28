@@ -1,28 +1,51 @@
 package ani.saikou.settings
 
 import android.app.AlertDialog
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.updateLayoutParams
 import androidx.core.widget.addTextChangedListener
 import ani.saikou.*
 import ani.saikou.databinding.ActivityPlayerSettingsBinding
+import ani.saikou.media.Media
+import ani.saikou.others.getSerialized
+import ani.saikou.parsers.Subtitle
+import com.google.android.material.snackbar.Snackbar
 import kotlin.math.roundToInt
 
 
 class PlayerSettingsActivity : AppCompatActivity() {
     lateinit var binding: ActivityPlayerSettingsBinding
     private val player = "player_settings"
+
+    var media:Media?=null
+    var subtitle:Subtitle?=null
+
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityPlayerSettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         initActivity(this)
+
+        onBackPressedDispatcher.addCallback(this) {
+            finish()
+        }
+
+        try {
+            media = intent.getSerialized("media")
+            subtitle = intent.getSerialized("subtitle")
+        } catch (e: Exception) {
+            toast(e.toString())
+        }
+
         binding.playerSettingsContainer.updateLayoutParams<ViewGroup.MarginLayoutParams> {
             topMargin = statusBarHeight
             bottomMargin = navBarHeight
@@ -31,7 +54,7 @@ class PlayerSettingsActivity : AppCompatActivity() {
         val settings = loadData<PlayerSettings>(player, toast = false) ?: PlayerSettings().apply { saveData(player, this) }
 
         binding.playerSettingsBack.setOnClickListener {
-            onBackPressed()
+            onBackPressedDispatcher.onBackPressed()
         }
 
         //Video
@@ -58,7 +81,7 @@ class PlayerSettingsActivity : AppCompatActivity() {
         var curSpeedArr = if (settings.cursedSpeeds) cursedSpeeds else speeds
         var speedsName = curSpeedArr.map { "${it}x" }.toTypedArray()
         binding.playerSettingsSpeed.text = getString(R.string.default_playback_speed, speedsName[settings.defaultSpeed])
-        val speedDialog = AlertDialog.Builder(this, R.style.DialogTheme).setTitle("Default Speed")
+        val speedDialog = AlertDialog.Builder(this, R.style.DialogTheme).setTitle(getString(R.string.default_speed))
         binding.playerSettingsSpeed.setOnClickListener {
             speedDialog.setSingleChoiceItems(speedsName, settings.defaultSpeed) { dialog, i ->
                 settings.defaultSpeed = i
@@ -78,7 +101,33 @@ class PlayerSettingsActivity : AppCompatActivity() {
             saveData(player, settings)
         }
 
+        //Time Stamp
+        binding.playerSettingsTimeStamps.isChecked = settings.timeStampsEnabled
+        binding.playerSettingsTimeStamps.setOnCheckedChangeListener { _, isChecked ->
+            settings.timeStampsEnabled = isChecked
+            saveData(player, settings)
+        }
+
+        binding.playerSettingsTimeStampsProxy.isChecked = settings.useProxyForTimeStamps
+        binding.playerSettingsTimeStampsProxy.setOnCheckedChangeListener { _, isChecked ->
+            settings.useProxyForTimeStamps = isChecked
+            saveData(player, settings)
+        }
+
+        binding.playerSettingsShowTimeStamp.isChecked = settings.showTimeStampButton
+        binding.playerSettingsShowTimeStamp.setOnCheckedChangeListener { _, isChecked ->
+            settings.showTimeStampButton = isChecked
+            saveData(player, settings)
+        }
+
+
         //Auto
+        binding.playerSettingsAutoSkipOpEd.isChecked = settings.autoSkipOPED
+        binding.playerSettingsAutoSkipOpEd.setOnCheckedChangeListener { _, isChecked ->
+            settings.autoSkipOPED = isChecked
+            saveData(player, settings)
+        }
+
         binding.playerSettingsAutoPlay.isChecked = settings.autoPlay
         binding.playerSettingsAutoPlay.setOnCheckedChangeListener { _, isChecked ->
             settings.autoPlay = isChecked
@@ -99,7 +148,7 @@ class PlayerSettingsActivity : AppCompatActivity() {
         binding.playerSettingsAskUpdateHentai.isChecked = settings.updateForH
         binding.playerSettingsAskUpdateHentai.setOnCheckedChangeListener { _, isChecked ->
             settings.updateForH = isChecked
-            if (isChecked) toastString(getString(R.string.very_bold))
+            if (isChecked) snackString(getString(R.string.very_bold))
             saveData(player, settings)
         }
         binding.playerSettingsCompletePercentage.value = (settings.watchPercentage * 100).roundToInt().toFloat()
@@ -120,6 +169,7 @@ class PlayerSettingsActivity : AppCompatActivity() {
             settings.focusPause = isChecked
             saveData(player, settings)
         }
+
         binding.playerSettingsVerticalGestures.isChecked = settings.gestures
         binding.playerSettingsVerticalGestures.setOnCheckedChangeListener { _, isChecked ->
             settings.gestures = isChecked
@@ -153,7 +203,7 @@ class PlayerSettingsActivity : AppCompatActivity() {
             }
         }
 
-
+        //Other
         binding.playerSettingsPiP.apply {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 visibility = View.VISIBLE
@@ -165,17 +215,184 @@ class PlayerSettingsActivity : AppCompatActivity() {
             } else visibility = View.GONE
         }
 
-        binding.playerSettingsAlwaysMinimize.isChecked = settings.alwaysMinimize
-        binding.playerSettingsAlwaysMinimize.setOnCheckedChangeListener { _, isChecked ->
-            settings.alwaysMinimize = isChecked
-            saveData(player, settings)
-        }
-
         binding.playerSettingsCast.isChecked = settings.cast
         binding.playerSettingsCast.setOnCheckedChangeListener { _, isChecked ->
             settings.cast = isChecked
             saveData(player, settings)
         }
 
+        val resizeModes = arrayOf("Original", "Zoom", "Stretch")
+        val resizeDialog = AlertDialog.Builder(this, R.style.DialogTheme).setTitle(getString(R.string.default_resize_mode))
+        binding.playerResizeMode.setOnClickListener {
+            resizeDialog.setSingleChoiceItems(resizeModes, settings.resize) { dialog, count ->
+                settings.resize = count
+                saveData(player, settings)
+                dialog.dismiss()
+            }.show()
+        }
+        fun restartApp() {
+            Snackbar.make(
+                binding.root,
+                R.string.restart_app, Snackbar.LENGTH_SHORT
+            ).apply {
+                val mainIntent =
+                    Intent.makeRestartActivityTask(context.packageManager.getLaunchIntentForPackage(context.packageName)!!.component)
+                setAction("Do it!") {
+                    context.startActivity(mainIntent)
+                    Runtime.getRuntime().exit(0)
+                }
+                show()
+            }
+        }
+
+        fun toggleButton(button: android.widget.Button, toggle: Boolean) {
+            button.isClickable = toggle
+            button.alpha = when (toggle) {
+                true  -> 1f
+                false -> 0.5f
+            }
+        }
+
+        fun toggleSubOptions(isChecked: Boolean) {
+            toggleButton(binding.videoSubColorPrimary, isChecked)
+            toggleButton(binding.videoSubColorSecondary, isChecked)
+            toggleButton(binding.videoSubOutline, isChecked)
+            toggleButton(binding.videoSubFont, isChecked)
+            binding.subtitleFontSizeCard.isEnabled = isChecked
+            binding.subtitleFontSizeCard.isClickable = isChecked
+            binding.subtitleFontSizeCard.alpha = when (isChecked) {
+                true  -> 1f
+                false -> 0.5f
+            }
+            binding.subtitleFontSize.isEnabled = isChecked
+            binding.subtitleFontSize.isClickable = isChecked
+            binding.subtitleFontSize.alpha = when (isChecked) {
+                true  -> 1f
+                false -> 0.5f
+            }
+            ActivityPlayerSettingsBinding.bind(binding.root).subtitleFontSizeText.isEnabled = isChecked
+            ActivityPlayerSettingsBinding.bind(binding.root).subtitleFontSizeText.isClickable = isChecked
+            ActivityPlayerSettingsBinding.bind(binding.root).subtitleFontSizeText.alpha = when (isChecked) {
+                true  -> 1f
+                false -> 0.5f
+            }
+        }
+        binding.subSwitch.isChecked = settings.subtitles
+        binding.subSwitch.setOnCheckedChangeListener { _, isChecked ->
+            settings.subtitles = isChecked
+            saveData(player, settings)
+            toggleSubOptions(isChecked)
+            restartApp()
+        }
+        val colorsPrimary =
+            arrayOf("Black", "Dark Gray", "Gray", "Light Gray", "White", "Red", "Yellow", "Green", "Cyan", "Blue", "Magenta")
+        val primaryColorDialog = AlertDialog.Builder(this, R.style.DialogTheme).setTitle(getString(R.string.primary_sub_color))
+        binding.videoSubColorPrimary.setOnClickListener {
+            primaryColorDialog.setSingleChoiceItems(colorsPrimary, settings.primaryColor) { dialog, count ->
+                settings.primaryColor = count
+                saveData(player, settings)
+                dialog.dismiss()
+            }.show()
+        }
+        val colorsSecondary = arrayOf(
+            "Black",
+            "Dark Gray",
+            "Gray",
+            "Light Gray",
+            "White",
+            "Red",
+            "Yellow",
+            "Green",
+            "Cyan",
+            "Blue",
+            "Magenta",
+            "Transparent"
+        )
+        val secondaryColorDialog = AlertDialog.Builder(this, R.style.DialogTheme).setTitle(getString(R.string.outline_sub_color))
+        binding.videoSubColorSecondary.setOnClickListener {
+            secondaryColorDialog.setSingleChoiceItems(colorsSecondary, settings.secondaryColor) { dialog, count ->
+                settings.secondaryColor = count
+                saveData(player, settings)
+                dialog.dismiss()
+            }.show()
+        }
+        val typesOutline = arrayOf("Outline", "Shine", "Drop Shadow", "None")
+        val outlineDialog = AlertDialog.Builder(this, R.style.DialogTheme).setTitle(getString(R.string.outline_type))
+        binding.videoSubOutline.setOnClickListener {
+            outlineDialog.setSingleChoiceItems(typesOutline, settings.outline) { dialog, count ->
+                settings.outline = count
+                saveData(player, settings)
+                dialog.dismiss()
+            }.show()
+        }
+        val colorsSubBackground = arrayOf(
+            "Transparent",
+            "Black",
+            "Dark Gray",
+            "Gray",
+            "Light Gray",
+            "White",
+            "Red",
+            "Yellow",
+            "Green",
+            "Cyan",
+            "Blue",
+            "Magenta"
+        )
+        val subBackgroundDialog = AlertDialog.Builder(this, R.style.DialogTheme).setTitle(getString(R.string.outline_sub_color))
+        binding.videoSubColorBackground.setOnClickListener {
+            subBackgroundDialog.setSingleChoiceItems(colorsSubBackground, settings.subBackground) { dialog, count ->
+                settings.subBackground = count
+                saveData(player, settings)
+                dialog.dismiss()
+            }.show()
+        }
+
+        val colorsSubWindow = arrayOf(
+            "Transparent",
+            "Black",
+            "Dark Gray",
+            "Gray",
+            "Light Gray",
+            "White",
+            "Red",
+            "Yellow",
+            "Green",
+            "Cyan",
+            "Blue",
+            "Magenta"
+        )
+        val subWindowDialog = AlertDialog.Builder(this, R.style.DialogTheme).setTitle(getString(R.string.outline_sub_color))
+        binding.videoSubColorWindow.setOnClickListener {
+            subWindowDialog.setSingleChoiceItems(colorsSubWindow, settings.subWindow) { dialog, count ->
+                settings.subWindow = count
+                saveData(player, settings)
+                dialog.dismiss()
+            }.show()
+        }
+        val fonts = arrayOf("Poppins Semi Bold", "Poppins Bold", "Poppins", "Poppins Thin")
+        val fontDialog = AlertDialog.Builder(this, R.style.DialogTheme).setTitle(getString(R.string.subtitle_font))
+        binding.videoSubFont.setOnClickListener {
+            fontDialog.setSingleChoiceItems(fonts, settings.font) { dialog, count ->
+                settings.font = count
+                saveData(player, settings)
+                dialog.dismiss()
+            }.show()
+        }
+        binding.subtitleFontSize.setText(settings.fontSize.toString())
+        binding.subtitleFontSize.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                binding.subtitleFontSize.clearFocus()
+            }
+            false
+        }
+        binding.subtitleFontSize.addTextChangedListener {
+            val size = binding.subtitleFontSize.text.toString().toIntOrNull()
+            if (size != null) {
+                settings.fontSize = size
+                saveData(player, settings)
+            }
+        }
+        toggleSubOptions(settings.subtitles)
     }
 }

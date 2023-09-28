@@ -1,177 +1,170 @@
 package ani.saikou.parsers.manga
 
-import ani.saikou.anilist.Anilist
+import ani.saikou.FileUrl
+import ani.saikou.connections.anilist.Anilist
 import ani.saikou.client
-import ani.saikou.parsers.*
-import ani.saikou.tryWithSuspend
-import com.fasterxml.jackson.annotation.JsonProperty
-import okhttp3.HttpUrl.Companion.toHttpUrl
+import ani.saikou.parsers.MangaChapter
+import ani.saikou.parsers.MangaImage
+import ani.saikou.parsers.MangaParser
+import ani.saikou.parsers.ShowResponse
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import java.text.DecimalFormat
 
 class AllAnime : MangaParser() {
     override val name = "AllAnime"
     override val saveName = "all_anime_manga"
-    override val hostUrl = "https://allanime.site"
+    override val hostUrl = "https://allanime.to"
 
+    private val apiHost = "api.allanime.day"
+    private val ytAnimeCoversHost = "https://wp.youtube-anime.com/aln.youtube-anime.com"
     private val idRegex = Regex("${hostUrl}/manga/(\\w+)")
     private val epNumRegex = Regex("/[sd]ub/(\\d+)")
 
+    private val idHash = "a42e1106694628f5e4eaecd8d7ce0c73895a22a3c905c29836e2c220cf26e55f"
+    private val episodeInfoHash = "ae7b2ed82ce3bf6fe9af426372174468958a066694167e6800bfcb3fcbdbb460"
+    private val searchHash = "a27e57ef5de5bae714db701fb7b5cf57e13d57938fc6256f7d5c70a975d11f3d"
+    private val chapterHash = "295146730c381d163441c23d0761e1eae8d0333db5c30688739b1ef1f399925c"
 
-    override suspend fun loadChapters(mangaLink: String): List<MangaChapter> {
-        val responseArray = mutableListOf<MangaChapter>()
-        tryWithSuspend {
-            val showId = idRegex.find(mangaLink)?.groupValues?.get(1)
-            if (showId != null) {
-                val episodeInfos = getEpisodeInfos(showId)
-                val format = DecimalFormat("#####.#####")
-                episodeInfos?.sortedBy { it.episodeIdNum }?.forEach { epInfo ->
-                    val link = """${hostUrl}/manga/$showId/chapters/sub/${epInfo.episodeIdNum}"""
-                    val epNum = format.format(epInfo.episodeIdNum).toString()
-                    responseArray.add(MangaChapter(epNum, link, epInfo.notes))
-                }
+    override suspend fun loadChapters(mangaLink: String, extra: Map<String, String>?): List<MangaChapter> {
+        val showId = idRegex.find(mangaLink)?.groupValues?.get(1)!!
+        val episodeInfos = getEpisodeInfos(showId)!!
+        val format = DecimalFormat("#####.#####")
 
-            }
+        return episodeInfos.sortedBy { it.episodeIdNum }.map { epInfo ->
+            val link = "${hostUrl}/manga/$showId/chapters/sub/${epInfo.episodeIdNum}"
+            val epNum = format.format(epInfo.episodeIdNum).toString()
+            MangaChapter(epNum, link, epInfo.notes)
         }
-        return responseArray
     }
 
     override suspend fun loadImages(chapterLink: String): List<MangaImage> {
-        val images = mutableListOf<MangaImage>()
-        val showId = idRegex.find(chapterLink)?.groupValues?.get(1)
-        val episodeNum = epNumRegex.find(chapterLink)?.groupValues?.get(1)
-        if (showId != null && episodeNum != null) {
-            tryWithSuspend {
-                val variables = """{"mangaId":"$showId","translationType":"sub","chapterString":"$episodeNum","limit":1000000}"""
-                val chapterPages =
-                    graphqlQuery(
-                        variables,
-                        "fd2226907c2435bdfc0d03a9c46ef354b75ba42ec0599acb6b3346ef9c1e162d"
-                    )?.data?.chapterPages?.edges
-                // For future reference: If pictureUrlHead is null then the link provided is a relative link of the "apivtwo" variety, but it doesn't seem to contain useful images
-                val chapter = chapterPages?.filter { !it.pictureUrlHead.isNullOrEmpty() }?.get(0)
-                chapter?.pictureUrls?.sortedBy { it.num }?.forEach { images.add(MangaImage("""${chapter.pictureUrlHead}${it.url}""")) }
-            }
-        }
+        val showId = idRegex.find(chapterLink)?.groupValues?.get(1)!!
+        val episodeNum = epNumRegex.find(chapterLink)?.groupValues?.get(1)!!
+        val variables = """{"mangaId":"$showId","translationType":"sub","chapterString":"$episodeNum","limit":1000000}"""
+        val chapterPages = graphqlQuery(variables, chapterHash).data?.chapterPages?.edges
+        // For future reference: If pictureUrlHead is null then the link provided is a relative link of the "apivtwo" variety, but it doesn't seem to contain useful images
+        val chapter = chapterPages?.filter { !it.pictureUrlHead.isNullOrEmpty() }?.get(0)!!
+        return chapter.pictureUrls.sortedBy { it.num }
+            .map { MangaImage(FileUrl("${chapter.pictureUrlHead}${it.url}", mapOf("referer" to chapterLink))) }
 
-        return images
     }
 
     override suspend fun search(query: String): List<ShowResponse> {
-        val responseArray = arrayListOf<ShowResponse>()
-        tryWithSuspend {
-            val variables =
-                """{"search":{"isManga":true,"allowAdult":${Anilist.adult},"query":"$query"},"translationType":"sub"}"""
-            val edges =
-                graphqlQuery(variables, "d35cd021d782eb55310250ea818269622b4b94742c25f8af778562317966ac88")?.data?.mangas?.edges
-            if (!edges.isNullOrEmpty()) {
-                for (show in edges) {
-                    val link = """${hostUrl}/manga/${show.id}"""
-                    val otherNames = mutableListOf<String>()
-                    show.englishName?.let { otherNames.add(it) }
-                    show.nativeName?.let { otherNames.add(it) }
-                    show.altNames?.forEach { otherNames.add(it) }
-                    responseArray.add(
-                        ShowResponse(
-                            show.name,
-                            link,
-                            show.thumbnail,
-                            otherNames,
-                            show.availableChapters.sub
-                        )
-                    )
-                }
+        val variables =
+            """{"search":{"isManga":true,"allowAdult":${Anilist.adult},"query":"$query"},"translationType":"sub"}"""
+        val edges =
+            graphqlQuery(variables, searchHash).data?.mangas?.edges!!
 
+        return edges.map { show ->
+            val link = "${hostUrl}/manga/${show.id}"
+            val otherNames = mutableListOf<String>()
+            show.englishName?.let { otherNames.add(it) }
+            show.nativeName?.let { otherNames.add(it) }
+            show.altNames?.forEach { otherNames.add(it) }
+            var thumbnail = show.thumbnail
+            if (thumbnail.startsWith("mcovers")) {
+                thumbnail = "$ytAnimeCoversHost/$thumbnail"
             }
+            ShowResponse(show.name, link, thumbnail, otherNames, show.availableChapters.sub)
         }
-        return responseArray
     }
 
-    private suspend fun graphqlQuery(variables: String, persistHash: String): Query? {
+    private suspend fun graphqlQuery(variables: String, persistHash: String): Query {
         val extensions = """{"persistedQuery":{"version":1,"sha256Hash":"$persistHash"}}"""
-        val graphqlUrl = ("$hostUrl/graphql").toHttpUrl().newBuilder().addQueryParameter("variables", variables)
-            .addQueryParameter("extensions", extensions).build()
-        return tryWithSuspend {
-            client.get(graphqlUrl.toString()).parsed()
-        }
+        val res = client.get(
+            "https://$apiHost/api",
+            headers = mapOf("origin" to hostUrl),
+            params = mapOf(
+                "variables" to variables,
+                "extensions" to extensions
+            )
+        ).parsed<Query>()
+        if (res.data == null) throw Exception("Var : $variables\nError : ${res.errors!![0].message}")
+        return res
     }
 
     private suspend fun getEpisodeInfos(showId: String): List<EpisodeInfo>? {
         val variables = """{"_id": "$showId"}"""
-        val manga = graphqlQuery(variables, "f60064134ecbaf89350a8aae1441dbffc86cf561a193a3bb8db4bb5a9989b9ad")?.data?.manga
+        val manga = graphqlQuery(variables, idHash).data?.manga
         if (manga != null) {
-            val epCount = manga.lastChapterInfo?.sub?.chapterString
-            if (epCount != null) {
-                val epVariables = """{"showId":"manga@$showId","episodeNumStart":0,"episodeNumEnd":${epCount.toFloat()}}"""
-                return graphqlQuery(
-                    epVariables,
-                    "73d998d209d6d8de325db91ed8f65716dce2a1c5f4df7d304d952fa3f223c9e8"
-                )?.data?.episodeInfos
-            }
+            val epCount = manga.availableChapters.sub
+            val epVariables = """{"showId":"manga@$showId","episodeNumStart":0,"episodeNumEnd":${epCount}}"""
+            return graphqlQuery(
+                epVariables,
+                episodeInfoHash
+            ).data?.episodeInfos
         }
         return null
     }
 
-    private data class Query(var data: Data?) {
+    @Serializable
+    private data class Query(
+        @SerialName("data") var data: Data?,
+        var errors: List<Error>?
+    ) {
+
+        @Serializable
+        data class Error(
+            var message: String
+        )
+
+        @Serializable
         data class Data(
-            val manga: Manga?,
-            val mangas: MangasConnection?,
-            val episodeInfos: List<EpisodeInfo>?,
-            val chapterPages: ChapterConnection?,
+            @SerialName("manga") val manga: Manga?,
+            @SerialName("mangas") val mangas: MangasConnection?,
+            @SerialName("episodeInfos") val episodeInfos: List<EpisodeInfo>?,
+            @SerialName("chapterPages") val chapterPages: ChapterConnection?,
         )
 
+        @Serializable
         data class MangasConnection(
-            val edges: List<Manga>
+            @SerialName("edges") val edges: List<Manga>
         )
 
+        @Serializable
         data class Manga(
-            @JsonProperty("_id")
-            val id: String,
-            val name: String,
-            val description: String?,
-            val englishName: String?,
-            val nativeName: String?,
-            val thumbnail: String,
-            val availableChapters: AvailableChapters,
-            val lastChapterInfo: LastChapterInfos?,
-            val altNames: List<String>?
+            @SerialName("_id") val id: String,
+            @SerialName("name") val name: String,
+            @SerialName("description") val description: String?,
+            @SerialName("englishName") val englishName: String?,
+            @SerialName("nativeName") val nativeName: String?,
+            @SerialName("thumbnail") val thumbnail: String,
+            @SerialName("availableChapters") val availableChapters: AvailableChapters,
+            @SerialName("altNames") val altNames: List<String>?
         )
 
-        data class LastChapterInfos(
-            val sub: LastChapterInfo?,
-            val raw: LastChapterInfo?,
-        )
-
-        data class LastChapterInfo(
-            val chapterString: String?,
-            val notes: String?
-        )
-
+        @Serializable
         data class AvailableChapters(
-            val sub: Int,
-            val raw: Int
+            @SerialName("sub") val sub: Int,
+            @SerialName("raw") val raw: Int
         )
 
+        @Serializable
         data class ChapterConnection(
-            val edges: List<Chapter>
+            @SerialName("edges") val edges: List<Chapter>
         ) {
+            @Serializable
             data class Chapter(
-                val pictureUrls: List<PictureUrl>,
-                val pictureUrlHead: String?
+                @SerialName("pictureUrls") val pictureUrls: List<PictureUrl>,
+                @SerialName("pictureUrlHead") val pictureUrlHead: String?
             )
 
+            @Serializable
             data class PictureUrl(
-                val num: Int,
-                val url: String
+                @SerialName("num") val num: Int,
+                @SerialName("url") val url: String
 
-                )
+            )
         }
     }
 
+    @Serializable
     private data class EpisodeInfo(
         // Episode "numbers" can have decimal values, hence float
-        val episodeIdNum: Float,
-        val notes: String?,
-        val thumbnails: List<String>?,
+        @SerialName("episodeIdNum") val episodeIdNum: Float,
+        @SerialName("notes") val notes: String?,
+        @SerialName("thumbnails") val thumbnails: List<String>?,
     )
 
 }

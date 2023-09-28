@@ -35,7 +35,7 @@ open class HentaiFF : AnimeParser() {
         return map.values.toList()
     }
 
-    override suspend fun loadVideoServers(episodeLink: String, extra: Any?): List<VideoServer> {
+    override suspend fun loadVideoServers(episodeLink: String, extra: Map<String,String>?): List<VideoServer> {
         return client.get(episodeLink).document.select("select.mirror>option").mapNotNull {
             tryWith {
                 val base64 = it.attr("value")
@@ -72,7 +72,7 @@ open class HentaiFF : AnimeParser() {
         override suspend fun extract(): VideoContainer {
             val host = URI.create(server.embed.url).host
             val link = "https://" + host + client.get(server.embed.url).document.select("source").attr("src")
-            return VideoContainer(listOf(Video(null, true, link)))
+            return VideoContainer(listOf(Video(null, VideoType.M3U8, link)))
         }
     }
 
@@ -83,13 +83,13 @@ open class HentaiFF : AnimeParser() {
             val link = String(Base64.decode(base64, Base64.DEFAULT)).substringAfter("url=").substringBefore(";")
             return VideoContainer(listOf(
                 FileUrl("${link}x264.720p.mp4", header).let {
-                    Video(720, false, it, getSize(it),"MP4")
+                    Video(720, VideoType.CONTAINER, it, getSize(it),"MP4")
                 },
                 FileUrl("${link}av1.1080p.webm", header).let {
-                    Video(1080, false, it, getSize(it),"WEBM")
+                    Video(1080, VideoType.CONTAINER, it, getSize(it),"WEBM")
                 },
                 FileUrl("${link}av1.2160p.webm", header).let {
-                    Video(2160, false, it, getSize(it),"WEBM")
+                    Video(2160, VideoType.CONTAINER, it, getSize(it),"WEBM")
                 }
             ))
         }

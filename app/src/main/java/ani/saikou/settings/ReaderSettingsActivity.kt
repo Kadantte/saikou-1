@@ -4,8 +4,14 @@ import android.os.Bundle
 import android.view.ViewGroup
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.updateLayoutParams
-import ani.saikou.*
+import ani.saikou.R
 import ani.saikou.databinding.ActivityReaderSettingsBinding
+import ani.saikou.initActivity
+import ani.saikou.loadData
+import ani.saikou.navBarHeight
+import ani.saikou.saveData
+import ani.saikou.snackString
+import ani.saikou.statusBarHeight
 
 class ReaderSettingsActivity : AppCompatActivity() {
     lateinit var binding: ActivityReaderSettingsBinding
@@ -24,7 +30,7 @@ class ReaderSettingsActivity : AppCompatActivity() {
         val settings = loadData<ReaderSettings>(reader, toast = false) ?: ReaderSettings().apply { saveData(reader, this) }
 
         binding.readerSettingsBack.setOnClickListener {
-            onBackPressed()
+            onBackPressedDispatcher.onBackPressed()
         }
 
         //General
@@ -53,7 +59,7 @@ class ReaderSettingsActivity : AppCompatActivity() {
             binding.readerSettingsContinuous
         )
 
-        binding.readerSettingsLayoutText.text = settings.default.layout.toString()
+        binding.readerSettingsLayoutText.text = resources.getStringArray(R.array.manga_layouts)[settings.default.layout.ordinal]
         var selectedLayout = layoutList[settings.default.layout.ordinal]
         selectedLayout.alpha = 1f
 
@@ -63,16 +69,16 @@ class ReaderSettingsActivity : AppCompatActivity() {
                 selectedLayout = imageButton
                 selectedLayout.alpha = 1f
                 settings.default.layout = CurrentReaderSettings.Layouts[index]?:CurrentReaderSettings.Layouts.CONTINUOUS
-                binding.readerSettingsLayoutText.text = settings.default.layout.toString()
+                binding.readerSettingsLayoutText.text = resources.getStringArray(R.array.manga_layouts)[settings.default.layout.ordinal]
                 saveData(reader, settings)
             }
         }
 
-        binding.readerSettingsDirectionText.text = settings.default.direction.toString()
+        binding.readerSettingsDirectionText.text = resources.getStringArray(R.array.manga_directions)[settings.default.direction.ordinal]
         binding.readerSettingsDirection.rotation = 90f * (settings.default.direction.ordinal)
         binding.readerSettingsDirection.setOnClickListener {
             settings.default.direction = CurrentReaderSettings.Directions[settings.default.direction.ordinal + 1] ?: CurrentReaderSettings.Directions.TOP_TO_BOTTOM
-            binding.readerSettingsDirectionText.text = settings.default.direction.toString()
+            binding.readerSettingsDirectionText.text = resources.getStringArray(R.array.manga_directions)[settings.default.direction.ordinal]
             binding.readerSettingsDirection.rotation = 90f * (settings.default.direction.ordinal)
             saveData(reader, settings)
         }
@@ -103,6 +109,18 @@ class ReaderSettingsActivity : AppCompatActivity() {
             saveData(reader, settings)
         }
 
+        binding.readerSettingsCropBorders.isChecked = settings.default.cropBorders
+        binding.readerSettingsCropBorders.setOnCheckedChangeListener { _, isChecked ->
+            settings.default.cropBorders = isChecked
+            saveData(reader, settings)
+        }
+
+        binding.readerSettingsImageRotation.isChecked = settings.default.rotation
+        binding.readerSettingsImageRotation.setOnCheckedChangeListener { _, isChecked ->
+            settings.default.rotation = isChecked
+            saveData(reader, settings)
+        }
+
         binding.readerSettingsHorizontalScrollBar.isChecked = settings.default.horizontalScrollBar
         binding.readerSettingsHorizontalScrollBar.setOnCheckedChangeListener { _, isChecked ->
             settings.default.horizontalScrollBar = isChecked
@@ -119,6 +137,36 @@ class ReaderSettingsActivity : AppCompatActivity() {
             settings.default.keepScreenOn = isChecked
             saveData(reader, settings)
         }
+
+        binding.readerSettingsHidePageNumbers.isChecked = settings.default.hidePageNumbers
+        binding.readerSettingsHidePageNumbers.setOnCheckedChangeListener { _, isChecked ->
+            settings.default.hidePageNumbers = isChecked
+            saveData(reader, settings)
+        }
+
+        binding.readerSettingsOverscroll.isChecked = settings.default.overScrollMode
+        binding.readerSettingsOverscroll.setOnCheckedChangeListener { _,isChecked ->
+            settings.default.overScrollMode = isChecked
+            saveData(reader, settings)
+        }
+
+        binding.readerSettingsVolumeButton.isChecked = settings.default.volumeButtons
+        binding.readerSettingsVolumeButton.setOnCheckedChangeListener { _,isChecked ->
+            settings.default.volumeButtons = isChecked
+            saveData(reader, settings)
+        }
+
+        binding.readerSettingsWrapImages.isChecked = settings.default.wrapImages
+        binding.readerSettingsWrapImages.setOnCheckedChangeListener { _,isChecked ->
+            settings.default.wrapImages = isChecked
+            saveData(reader, settings)
+        }
+
+        binding.readerSettingsLongClickImage.isChecked = settings.default.longClickImage
+        binding.readerSettingsLongClickImage.setOnCheckedChangeListener { _,isChecked ->
+            settings.default.longClickImage = isChecked
+            saveData(reader, settings)
+        }
         
         //Update Progress
         binding.readerSettingsAskUpdateProgress.isChecked = settings.askIndividual
@@ -129,7 +177,7 @@ class ReaderSettingsActivity : AppCompatActivity() {
         binding.readerSettingsAskUpdateDoujins.isChecked = settings.updateForH
         binding.readerSettingsAskUpdateDoujins.setOnCheckedChangeListener { _, isChecked ->
             settings.updateForH = isChecked
-            if (isChecked) toastString(getString(R.string.very_bold))
+            if (isChecked) snackString(getString(R.string.very_bold))
             saveData(reader, settings)
         }
 

@@ -45,6 +45,12 @@
     <style name="fontTooltip" parent="Widget.Material3.Tooltip">
         <item name="android:padding">8dp</item>
         <item name="android:textAppearance">@style/Suffix</item>
+        <item name="android:layout_margin">48dp</item>
+        <item name="shapeAppearance">@style/ShapeAppearance.MaterialComponents.Tooltip</item>
+    </style>
+
+    <style name="MyPopup" parent="@style/Widget.MaterialComponents.PopupMenu">
+        <item name="android:popupBackground">@color/bg</item>
     </style>
 
     <style name="BottomNavBar" parent="Widget.Material3.BottomNavigationView.ActiveIndicator"/>

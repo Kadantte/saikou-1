@@ -6,24 +6,25 @@ data class CurrentReaderSettings(
     var direction: Directions = Directions.TOP_TO_BOTTOM,
     var layout: Layouts = Layouts.CONTINUOUS,
     var dualPageMode: DualPageModes = DualPageModes.Automatic,
-    var trueColors : Boolean = false,
+    var overScrollMode: Boolean = true,
+    var trueColors: Boolean = false,
+    var rotation: Boolean = true,
     var padding: Boolean = true,
+    var hidePageNumbers: Boolean = false,
     var horizontalScrollBar: Boolean = true,
     var keepScreenOn: Boolean = false,
+    var volumeButtons: Boolean = false,
+    var wrapImages: Boolean = false,
+    var longClickImage: Boolean = true,
+    var cropBorders: Boolean = false,
+    var cropBorderThreshold: Int = 10,
 ) : Serializable {
 
     enum class Directions {
-        TOP_TO_BOTTOM, LEFT_TO_RIGHT, BOTTOM_TO_TOP, RIGHT_TO_LEFT;
-
-        override fun toString(): String {
-            return when (super.ordinal) {
-                TOP_TO_BOTTOM.ordinal -> "Top to Bottom"
-                LEFT_TO_RIGHT.ordinal -> "Left to Right"
-                BOTTOM_TO_TOP.ordinal -> "Bottom to Top"
-                RIGHT_TO_LEFT.ordinal -> "Right to Left"
-                else                  -> "Wha"
-            }
-        }
+        TOP_TO_BOTTOM,
+        RIGHT_TO_LEFT,
+        BOTTOM_TO_TOP,
+        LEFT_TO_RIGHT;
 
         companion object {
             operator fun get(value: Int) = values().firstOrNull { it.ordinal == value }
@@ -31,16 +32,9 @@ data class CurrentReaderSettings(
     }
 
     enum class Layouts {
-        PAGED, CONTINUOUS_PAGED, CONTINUOUS;
-
-        override fun toString(): String {
-            return when (super.ordinal) {
-                PAGED.ordinal            -> "Paged"
-                CONTINUOUS_PAGED.ordinal -> "Continuous Paged"
-                CONTINUOUS.ordinal       -> "Continuous"
-                else                     -> "Wha"
-            }
-        }
+        PAGED,
+        CONTINUOUS_PAGED,
+        CONTINUOUS;
 
         companion object {
             operator fun get(value: Int) = values().firstOrNull { it.ordinal == value }
@@ -52,6 +46,17 @@ data class CurrentReaderSettings(
 
         companion object {
             operator fun get(value: Int) = values().firstOrNull { it.ordinal == value }
+        }
+    }
+
+    companion object {
+        fun applyWebtoon(settings: CurrentReaderSettings) {
+            settings.apply {
+                layout = Layouts.CONTINUOUS
+                direction = Directions.TOP_TO_BOTTOM
+                dualPageMode = DualPageModes.No
+                padding = false
+            }
         }
     }
 }

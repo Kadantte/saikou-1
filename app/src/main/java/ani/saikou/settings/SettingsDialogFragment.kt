@@ -10,7 +10,8 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
 import ani.saikou.*
-import ani.saikou.anilist.Anilist
+import ani.saikou.connections.anilist.Anilist
+import ani.saikou.others.imagesearch.ImageSearchActivity
 import ani.saikou.databinding.BottomSheetSettingsBinding
 
 
@@ -31,7 +32,7 @@ class SettingsDialogFragment : BottomSheetDialogFragment() {
             binding.settingsLogin.setOnClickListener {
                 Anilist.removeSavedToken(it.context)
                 dismiss()
-                startMainActivity(requireActivity())
+                startMainActivity(requireActivity(),)
             }
             binding.settingsUsername.text = Anilist.username
             binding.settingsUserAvatar.loadImage(Anilist.avatar)
@@ -52,7 +53,10 @@ class SettingsDialogFragment : BottomSheetDialogFragment() {
             openLinkInBrowser("https://anilist.co/settings/lists")
             dismiss()
         }
-
+        binding.imageSearch.setOnClickListener {
+            startActivity(Intent(activity, ImageSearchActivity::class.java))
+            dismiss()
+        }
         binding.settingsDownloads.setSafeOnClickListener {
             try {
                 val arrayOfFiles = ContextCompat.getExternalFilesDirs(requireContext(), null)
@@ -64,7 +68,7 @@ class SettingsDialogFragment : BottomSheetDialogFragment() {
                     } else Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
                 )
             } catch (e: ActivityNotFoundException) {
-                toast("Couldn't find any File Manager to open SD card")
+                toast(getString(R.string.file_manager_not_found))
             }
             dismiss()
         }

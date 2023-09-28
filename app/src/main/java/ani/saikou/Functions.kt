@@ -3,21 +3,23 @@ package ani.saikou
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.app.Application
 import android.app.DatePickerDialog
-import android.app.DownloadManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.DialogInterface
 import android.content.Intent
 import android.content.res.Configuration
 import android.content.res.Resources.getSystem
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.media.MediaScannerConnection
 import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
+import android.net.NetworkCapabilities.*
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
+import android.telephony.TelephonyManager
 import android.text.InputFilter
 import android.text.Spanned
 import android.util.AttributeSet
@@ -25,43 +27,36 @@ import android.view.*
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.animation.*
 import android.widget.*
-import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
-import androidx.core.content.ContextCompat.getExternalFilesDirs
 import androidx.core.content.ContextCompat.getSystemService
+import androidx.core.content.FileProvider
 import androidx.core.math.MathUtils.clamp
 import androidx.core.view.*
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.MutableLiveData
-import androidx.multidex.MultiDex
-import androidx.multidex.MultiDexApplication
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
-import ani.saikou.anilist.Anilist
-import ani.saikou.anilist.Genre
-import ani.saikou.anilist.api.FuzzyDate
-import ani.saikou.anime.Episode
+import ani.saikou.BuildConfig.APPLICATION_ID
+import ani.saikou.connections.anilist.Genre
+import ani.saikou.connections.anilist.api.FuzzyDate
 import ani.saikou.databinding.ItemCountDownBinding
 import ani.saikou.media.Media
-import ani.saikou.others.DisableFirebase
 import ani.saikou.parsers.ShowResponse
 import ani.saikou.settings.UserInterfaceSettings
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.model.GlideUrl
 import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions.withCrossFade
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
-import com.google.android.exoplayer2.ui.DefaultTimeBar
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.internal.ViewUtils
 import com.google.android.material.snackbar.Snackbar
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import nl.joery.animatedbottombar.AnimatedBottomBar
 import java.io.*
+import java.lang.Runnable
 import java.lang.reflect.Field
 import java.util.*
 import kotlin.math.*
@@ -85,6 +80,10 @@ object Refresh {
     val activity = mutableMapOf<Int, MutableLiveData<Boolean>>()
 }
 
+fun currContext(): Context? {
+    return App.currentContext()
+}
+
 fun currActivity(): Activity? {
     return App.currentActivity()
 }
@@ -97,9 +96,9 @@ fun logger(e: Any?, print: Boolean = true) {
         println(e)
 }
 
-fun saveData(fileName: String, data: Any?, activity: Context? = null) {
+fun saveData(fileName: String, data: Any?, context: Context? = null) {
     tryWith {
-        val a = activity ?: currActivity()
+        val a = context ?: currContext()
         if (a != null) {
             val fos: FileOutputStream = a.openFileOutput(fileName, Context.MODE_PRIVATE)
             val os = ObjectOutputStream(fos)
@@ -111,8 +110,8 @@ fun saveData(fileName: String, data: Any?, activity: Context? = null) {
 }
 
 @Suppress("UNCHECKED_CAST")
-fun <T> loadData(fileName: String, activity: Context? = null, toast: Boolean = true): T? {
-    val a = activity ?: currActivity()
+fun <T> loadData(fileName: String, context: Context? = null, toast: Boolean = true): T? {
+    val a = context ?: currContext()
     try {
         if (a?.fileList() != null)
             if (fileName in a.fileList()) {
@@ -124,7 +123,8 @@ fun <T> loadData(fileName: String, activity: Context? = null, toast: Boolean = t
                 return data
             }
     } catch (e: Exception) {
-        if (toast) toastString("Error loading data $fileName")
+        if (toast) snackString(a?.getString(R.string.error_loading_data, fileName))
+        e.printStackTrace()
     }
     return null
 }
@@ -133,17 +133,14 @@ fun initActivity(a: Activity) {
     val window = a.window
     WindowCompat.setDecorFitsSystemWindows(window, false)
     val uiSettings = loadData<UserInterfaceSettings>("ui_settings", toast = false) ?: UserInterfaceSettings().apply {
-        saveData(
-            "ui_settings",
-            this
-        )
+        saveData("ui_settings", this)
     }
     uiSettings.darkMode.apply {
         AppCompatDelegate.setDefaultNightMode(
             when (this) {
-                true  -> AppCompatDelegate.MODE_NIGHT_YES
+                true -> AppCompatDelegate.MODE_NIGHT_YES
                 false -> AppCompatDelegate.MODE_NIGHT_NO
-                else  -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+                else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
             }
         )
     }
@@ -208,39 +205,35 @@ fun isOnline(context: Context): Boolean {
     val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     return tryWith {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val capabilities = connectivityManager.getNetworkCapabilities(connectivityManager.activeNetwork)
-            return@tryWith if (capabilities != null) {
+            val cap = connectivityManager.getNetworkCapabilities(connectivityManager.activeNetwork)
+            return@tryWith if (cap != null) {
                 when {
-                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> {
-                        logger("Device on Cellular")
-                        true
-                    }
-                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)     -> {
-                        logger("Device on Wifi")
-                        true
-                    }
-                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> {
-                        logger("Device on Ethernet, TF man?")
-                        true
-                    }
-                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)      -> {
-                        logger("Device on VPN")
-                        true
-                    }
-                    else                                                              -> false
+                    cap.hasTransport(TRANSPORT_BLUETOOTH) ||
+                            cap.hasTransport(TRANSPORT_CELLULAR) ||
+                            cap.hasTransport(TRANSPORT_ETHERNET) ||
+                            cap.hasTransport(TRANSPORT_LOWPAN) ||
+                            cap.hasTransport(TRANSPORT_USB) ||
+                            cap.hasTransport(TRANSPORT_VPN) ||
+                            cap.hasTransport(TRANSPORT_WIFI) ||
+                            cap.hasTransport(TRANSPORT_WIFI_AWARE) -> true
+
+                    else                                           -> false
                 }
             } else false
         } else true
     } ?: false
 }
 
-fun startMainActivity(activity: Activity) {
+fun startMainActivity(activity: Activity, bundle: Bundle? = null) {
     activity.finishAffinity()
     activity.startActivity(
         Intent(
             activity,
             MainActivity::class.java
-        ).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
+        ).apply {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (bundle != null) putExtras(bundle)
+        }
     )
 }
 
@@ -255,6 +248,14 @@ class DatePickerFragment(activity: Activity, var date: FuzzyDate = FuzzyDate().g
         val month = if (date.month != null) date.month!! - 1 else c.get(Calendar.MONTH)
         val day = date.day ?: c.get(Calendar.DAY_OF_MONTH)
         dialog = DatePickerDialog(activity, this, year, month, day)
+        dialog.setButton(
+            DialogInterface.BUTTON_NEUTRAL,
+            activity.getString(R.string.remove)
+        ) { dialog, which ->
+            if (which == DialogInterface.BUTTON_NEUTRAL) {
+                date = FuzzyDate()
+            }
+        }
     }
 
     override fun onDateSet(view: DatePicker, year: Int, month: Int, day: Int) {
@@ -276,8 +277,10 @@ class InputFilterMinMax(private val min: Double, private val max: Double, privat
 
     @SuppressLint("SetTextI18n")
     private fun isInRange(a: Double, b: Double, c: Double): Boolean {
+        val statusStrings = currContext()!!.resources.getStringArray(R.array.status_manga)[2]
+
         if (c == b) {
-            status?.setText("COMPLETED", false)
+            status?.setText(statusStrings, false)
             status?.parent?.requestLayout()
         }
         return if (b > a) c in a..b else c in b..a
@@ -385,6 +388,12 @@ fun levenshtein(lhs: CharSequence, rhs: CharSequence): Int {
     return cost[lhsLength - 1]
 }
 
+fun List<ShowResponse>.sortByTitle(string: String): List<ShowResponse> {
+    val list = this.toMutableList()
+    list.sortByTitle(string)
+    return list
+}
+
 fun MutableList<ShowResponse>.sortByTitle(string: String) {
     val temp: MutableMap<Int, Int> = mutableMapOf()
     for (i in 0 until this.size) {
@@ -404,19 +413,18 @@ fun MutableList<ShowResponse>.sortByTitle(string: String) {
 }
 
 fun String.findBetween(a: String, b: String): String? {
-    val start = this.indexOf(a)
-    val end = if (start != -1) this.indexOf(b, start) else return null
-    return if (end != -1) this.subSequence(start, end).removePrefix(a).removeSuffix(b).toString() else null
+    val string = substringAfter(a, "").substringBefore(b,"")
+    return string.ifEmpty { null }
 }
 
 fun ImageView.loadImage(url: String?, size: Int = 0) {
     if (!url.isNullOrEmpty()) {
-        loadImage(FileUrl(url),size)
+        loadImage(FileUrl(url), size)
     }
 }
 
-fun ImageView.loadImage(file: FileUrl, size: Int = 0) {
-    if (file.url.isNotEmpty()) {
+fun ImageView.loadImage(file: FileUrl?, size: Int = 0) {
+    if (file?.url?.isNotEmpty() == true) {
         tryWith {
             val glideUrl = GlideUrl(file.url) { file.headers }
             Glide.with(this.context).load(glideUrl).transition(withCrossFade()).override(size).into(this)
@@ -449,7 +457,7 @@ fun View.setSafeOnClickListener(onSafeClick: (View) -> Unit) {
 
 suspend fun getSize(file: FileUrl): Double? {
     return tryWithSuspend {
-        client.head(file.url, file.headers, timeout = 1000).size?.toDouble()?.div(1024*1024)
+        client.head(file.url, file.headers, timeout = 1000).size?.toDouble()?.div(1024 * 1024)
     }
 }
 
@@ -458,92 +466,32 @@ suspend fun getSize(file: String): Double? {
 }
 
 
-class App : MultiDexApplication() {
-    override fun attachBaseContext(base: Context?) {
-        super.attachBaseContext(base)
-        MultiDex.install(this)
-    }
-
-    init {
-        instance = this
-    }
-
-    val mFTActivityLifecycleCallbacks = FTActivityLifecycleCallbacks()
-
-    override fun onCreate() {
-        super.onCreate()
-        registerActivityLifecycleCallbacks(mFTActivityLifecycleCallbacks)
-
-        DisableFirebase.handle()
-        initializeNetwork(baseContext)
-
-    }
-
-    companion object {
-        private var instance: App? = null
-        fun currentActivity(): Activity? {
-            return instance?.mFTActivityLifecycleCallbacks?.currentActivity
-        }
-    }
-}
-
-class FTActivityLifecycleCallbacks : Application.ActivityLifecycleCallbacks {
-    var currentActivity: Activity? = null
-    override fun onActivityCreated(p0: Activity, p1: Bundle?) {}
-    override fun onActivityStarted(p0: Activity) {}
-    override fun onActivityResumed(p0: Activity) {
-        currentActivity = p0
-    }
-
-    override fun onActivityPaused(p0: Activity) {}
-    override fun onActivityStopped(p0: Activity) {}
-    override fun onActivitySaveInstanceState(p0: Activity, p1: Bundle) {}
-    override fun onActivityDestroyed(p0: Activity) {}
-}
-
-@SuppressLint("ViewConstructor")
-class ExtendedTimeBar(
-    context: Context,
-    attrs: AttributeSet?
-) : DefaultTimeBar(context, attrs) {
-    private var enabled = false
-    private var forceDisabled = false
-    override fun setEnabled(enabled: Boolean) {
-        this.enabled = enabled
-        super.setEnabled(!forceDisabled && this.enabled)
-    }
-
-    fun setForceDisabled(forceDisabled: Boolean) {
-        this.forceDisabled = forceDisabled
-        isEnabled = enabled
-    }
-}
-
 abstract class GesturesListener : GestureDetector.SimpleOnGestureListener() {
     private var timer: Timer? = null //at class level;
     private val delay: Long = 200
 
-    override fun onSingleTapUp(e: MotionEvent?): Boolean {
+    override fun onSingleTapUp(e: MotionEvent): Boolean {
         processSingleClickEvent(e)
         return super.onSingleTapUp(e)
     }
 
-    override fun onLongPress(e: MotionEvent?) {
+    override fun onLongPress(e: MotionEvent) {
         processLongClickEvent(e)
         super.onLongPress(e)
     }
 
-    override fun onDoubleTap(e: MotionEvent?): Boolean {
+    override fun onDoubleTap(e: MotionEvent): Boolean {
         processDoubleClickEvent(e)
         return super.onDoubleTap(e)
     }
 
-    override fun onScroll(e1: MotionEvent?, e2: MotionEvent?, distanceX: Float, distanceY: Float): Boolean {
+    override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
         onScrollYClick(distanceY)
+        onScrollXClick(distanceX)
         return super.onScroll(e1, e2, distanceX, distanceY)
     }
 
-    private fun processSingleClickEvent(e: MotionEvent?) {
+    private fun processSingleClickEvent(e: MotionEvent) {
         val handler = Handler(Looper.getMainLooper())
         val mRunnable = Runnable {
             onSingleClick(e)
@@ -557,100 +505,88 @@ abstract class GesturesListener : GestureDetector.SimpleOnGestureListener() {
         }
     }
 
-    private fun processDoubleClickEvent(e: MotionEvent?) {
+    private fun processDoubleClickEvent(e: MotionEvent) {
         timer?.apply {
             cancel()
             purge()
         }
-        onDoubleClick(e) //Do what ever u want on Double Click
+        onDoubleClick(e)
     }
 
-    private fun processLongClickEvent(e: MotionEvent?) {
+    private fun processLongClickEvent(e: MotionEvent) {
         timer?.apply {
             cancel()
             purge()
         }
-        onLongClick(e) //Do what ever u want on Double Click
+        onLongClick(e)
     }
 
-    open fun onSingleClick(event: MotionEvent?) {}
-    open fun onDoubleClick(event: MotionEvent?) {}
+    open fun onSingleClick(event: MotionEvent) {}
+    open fun onDoubleClick(event: MotionEvent) {}
     open fun onScrollYClick(y: Float) {}
-    open fun onLongClick(event: MotionEvent?) {}
+    open fun onScrollXClick(y: Float) {}
+    open fun onLongClick(event: MotionEvent) {}
 }
 
-fun View.circularReveal(x: Int, y: Int, time: Long) {
-    ViewAnimationUtils.createCircularReveal(this, x, y, 0f, max(height, width).toFloat()).setDuration(time).start()
+fun View.circularReveal(ex: Int, ey: Int, subX: Boolean, time: Long) {
+    ViewAnimationUtils.createCircularReveal(
+        this,
+        if (subX) (ex - x.toInt()) else ex,
+        ey - y.toInt(),
+        0f,
+        max(height, width).toFloat()
+    ).setDuration(time).start()
 }
 
 fun openLinkInBrowser(link: String?) {
     tryWith {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link))
-        currActivity()?.startActivity(intent)
+        currContext()?.startActivity(intent)
     }
 }
 
-fun download(activity: Activity, episode: Episode, animeTitle: String) {
-    val manager = activity.getSystemService(AppCompatActivity.DOWNLOAD_SERVICE) as DownloadManager
-    val extractor = episode.extractors?.find { it.server.name == episode.selectedServer } ?: return
-    val video =
-        if (extractor.videos.size > episode.selectedVideo) extractor.videos[episode.selectedVideo] else return
-    val regex = "[\\\\/:*?\"<>|]".toRegex()
-    val aTitle = animeTitle.replace(regex, "")
-    val request: DownloadManager.Request = DownloadManager.Request(Uri.parse(video.url.url))
+fun saveImageToDownloads(title: String, bitmap: Bitmap, context: Context) {
+    FileProvider.getUriForFile(
+        context,
+        "$APPLICATION_ID.provider",
+        saveImage(
+            bitmap,
+            Environment.getExternalStorageDirectory().absolutePath + "/" + Environment.DIRECTORY_DOWNLOADS,
+            title
+        ) ?: return
+    )
+}
 
-    video.url.headers.forEach {
-        request.addRequestHeader(it.key, it.value)
-    }
+fun shareImage(title: String, bitmap: Bitmap, context: Context) {
 
-    val title = "Episode ${episode.number}${if (episode.title != null) " - ${episode.title}" else ""}".replace(regex, "")
-    val name = "$title${if (video.size != null) "(${video.size}p)" else ""}.mp4"
-    CoroutineScope(Dispatchers.IO).launch {
-        try {
-            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+    val contentUri = FileProvider.getUriForFile(
+        context,
+        "$APPLICATION_ID.provider",
+        saveImage(bitmap, context.cacheDir.absolutePath, title) ?: return
+    )
 
-            val arrayOfFiles = getExternalFilesDirs(activity, null)
-            if (loadData<Boolean>("sd_dl") == true && arrayOfFiles.size > 1 && arrayOfFiles[0] != null && arrayOfFiles[1] != null) {
-                val parentDirectory = arrayOfFiles[1].toString() + "/Anime/${aTitle}/"
-                val direct = File(parentDirectory)
-                if (!direct.exists()) direct.mkdirs()
-                request.setDestinationUri(Uri.fromFile(File("$parentDirectory$name")))
-            } else {
-                val direct = File(Environment.DIRECTORY_DOWNLOADS + "/Saikou/Anime/${aTitle}/")
-                if (!direct.exists()) direct.mkdirs()
-                request.setDestinationInExternalPublicDir(
-                    Environment.DIRECTORY_DOWNLOADS,
-                    "/Saikou/Anime/${aTitle}/$name"
-                )
-            }
-            request.setTitle("$title:$aTitle")
-            manager.enqueue(request)
-            toast("Started Downloading\n$title : $aTitle")
-        } catch (e: SecurityException) {
-            toast("Please give permission to access Files & Folders from Settings, & Try again.")
-        } catch (e: Exception) {
-            toast(e.toString())
-        }
+    val intent = Intent(Intent.ACTION_SEND)
+    intent.type = "image/png"
+    intent.putExtra(Intent.EXTRA_TEXT, title)
+    intent.putExtra(Intent.EXTRA_STREAM, contentUri)
+    context.startActivity(Intent.createChooser(intent, "Share $title"))
+}
+
+fun saveImage(image: Bitmap, path: String, imageFileName: String): File? {
+    val imageFile = File(path, "$imageFileName.png")
+    return tryWith {
+        val fOut: OutputStream = FileOutputStream(imageFile)
+        image.compress(Bitmap.CompressFormat.PNG, 0, fOut)
+        fOut.close()
+        scanFile(imageFile.absolutePath, currContext()!!)
+        toast(String.format(currContext()!!.getString(R.string.saved_to_path, path)))
+        imageFile
     }
 }
 
-fun updateAnilistProgress(media: Media, number: String) {
-    if (Anilist.userid != null) {
-        CoroutineScope(Dispatchers.IO).launch {
-            val a = number.toFloatOrNull()?.roundToInt()
-            if (a != media.userProgress) {
-                Anilist.mutation.editList(
-                    media.id,
-                    a,
-                    status = if (media.userStatus == "REPEATING") media.userStatus else "CURRENT"
-                )
-                toast("Setting progress to $a")
-            }
-            media.userProgress = a
-            Refresh.all()
-        }
-    } else {
-        toast("Please Login into anilist account!")
+private fun scanFile(path: String, context: Context) {
+    MediaScannerConnection.scanFile(context, arrayOf(path), null) { p, _ ->
+        logger("Finished scanning $p")
     }
 }
 
@@ -678,11 +614,11 @@ class NoGestureSubsamplingImageView(context: Context?, attr: AttributeSet?) :
 }
 
 fun copyToClipboard(string: String, toast: Boolean = true) {
-    val activity = currActivity() ?: return
+    val activity = currContext() ?: return
     val clipboard = getSystemService(activity, ClipboardManager::class.java)
     val clip = ClipData.newPlainText("label", string)
     clipboard?.setPrimaryClip(clip)
-    if (toast) toastString("Copied \"$string\"")
+    if (toast) snackString(activity.getString(R.string.copied_text, string))
 }
 
 @SuppressLint("SetTextI18n")
@@ -690,17 +626,24 @@ fun countDown(media: Media, view: ViewGroup) {
     if (media.anime?.nextAiringEpisode != null && media.anime.nextAiringEpisodeTime != null && (media.anime.nextAiringEpisodeTime!! - System.currentTimeMillis() / 1000) <= 86400 * 7.toLong()) {
         val v = ItemCountDownBinding.inflate(LayoutInflater.from(view.context), view, false)
         view.addView(v.root, 0)
-        v.mediaCountdownText.text = "Episode ${media.anime.nextAiringEpisode!! + 1} will be released in"
+        v.mediaCountdownText.text =
+            currActivity()?.getString(R.string.episode_release_countdown, media.anime.nextAiringEpisode!! + 1)
+
         object : CountDownTimer((media.anime.nextAiringEpisodeTime!! + 10000) * 1000 - System.currentTimeMillis(), 1000) {
             override fun onTick(millisUntilFinished: Long) {
                 val a = millisUntilFinished / 1000
-                v.mediaCountdown.text =
-                    "${a / 86400} days ${a % 86400 / 3600} hrs ${a % 86400 % 3600 / 60} mins ${a % 86400 % 3600 % 60} secs"
+                v.mediaCountdown.text = currActivity()?.getString(
+                    R.string.time_format,
+                    a / 86400,
+                    a % 86400 / 3600,
+                    a % 86400 % 3600 / 60,
+                    a % 86400 % 3600 % 60
+                )
             }
 
             override fun onFinish() {
                 v.mediaCountdownContainer.visibility = View.GONE
-                toastString("Congrats Vro")
+                snackString(currContext()?.getString(R.string.congrats_vro))
             }
         }.start()
     }
@@ -773,18 +716,16 @@ class EmptyAdapter(private val count: Int) : RecyclerView.Adapter<RecyclerView.V
     inner class EmptyViewHolder(view: View) : RecyclerView.ViewHolder(view)
 }
 
-fun toast(string: String?, activity: Activity? = null) {
+fun toast(string: String?) {
     if (string != null) {
-        (activity ?: currActivity())?.apply {
-            runOnUiThread {
-                Toast.makeText(this, string, Toast.LENGTH_SHORT).show()
-            }
-        }
         logger(string)
+        MainScope().launch {
+            Toast.makeText(currActivity()?.application ?: return@launch, string, Toast.LENGTH_SHORT).show()
+        }
     }
 }
 
-fun toastString(s: String?, activity: Activity? = null) {
+fun snackString(s: String?, activity: Activity? = null, clipboard: String? = null) {
     if (s != null) {
         (activity ?: currActivity())?.apply {
             runOnUiThread {
@@ -801,8 +742,8 @@ fun toastString(s: String?, activity: Activity? = null) {
                         snackBar.dismiss()
                     }
                     setOnLongClickListener {
-                        copyToClipboard(s, false)
-                        toast("Copied to Clipboard")
+                        copyToClipboard(clipboard ?: s, false)
+                        toast(getString(R.string.copied_to_clipboard))
                         true
                     }
                 }
@@ -899,3 +840,34 @@ fun brightnessConverter(it: Float, fromLog: Boolean) =
             if (fromLog) log2((it * 256f)) * 12.5f / 100f else 2f.pow(it * 100f / 12.5f) / 256f
         else it, 0.001f, 1f
     )
+
+
+fun checkCountry(context: Context): Boolean {
+    val telMgr = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+    return when (telMgr.simState) {
+        TelephonyManager.SIM_STATE_ABSENT -> {
+            val tz = TimeZone.getDefault().id
+            tz.equals("Asia/Kolkata", ignoreCase = true)
+        }
+
+        TelephonyManager.SIM_STATE_READY  -> {
+            val countryCodeValue = telMgr.networkCountryIso
+            countryCodeValue.equals("in", ignoreCase = true)
+        }
+
+        else                              -> false
+    }
+}
+
+suspend fun View.pop() {
+    currActivity()?.runOnUiThread {
+        ObjectAnimator.ofFloat(this@pop, "scaleX", 1f, 1.25f).setDuration(120).start()
+        ObjectAnimator.ofFloat(this@pop, "scaleY", 1f, 1.25f).setDuration(120).start()
+    }
+    delay(120)
+    currActivity()?.runOnUiThread {
+        ObjectAnimator.ofFloat(this@pop, "scaleX", 1.25f, 1f).setDuration(100).start()
+        ObjectAnimator.ofFloat(this@pop, "scaleY", 1.25f, 1f).setDuration(100).start()
+    }
+    delay(100)
+}
